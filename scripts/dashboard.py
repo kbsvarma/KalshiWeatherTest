@@ -419,82 +419,182 @@ st.set_page_config(
     page_title="Kalshi Weather Bot",
     page_icon="🌡️",
     layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
-# Top right: timestamp + manual refresh
-top_cols = st.columns([8, 1, 1])
-with top_cols[1]:
-    st.markdown(
-        f"<div style='text-align:right;padding-top:8px;'>"
-        f"<code>{datetime.now(ET).strftime('%I:%M:%S %p ET')}</code></div>",
-        unsafe_allow_html=True,
-    )
-with top_cols[2]:
-    if st.button("↻ Refresh", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
 
-# ── Header card ──
+# Global CSS — match stocktradingbot aesthetic
+st.markdown(
+    """
+    <style>
+    /* Page bg + body */
+    .stApp {
+        background-color: #f7f8fa;
+    }
+    .main .block-container {
+        padding-top: 1.5rem;
+        padding-bottom: 4rem;
+        max-width: 1400px;
+    }
+    /* Reset Streamlit defaults */
+    section[data-testid="stSidebar"] { display: none; }
+    [data-testid="stHeader"] { background: transparent; height: 0; }
+    div[data-testid="stToolbar"] { display: none; }
+    /* Containers — clean white cards with thin borders */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background: #ffffff;
+        border: 1px solid #e5e7eb !important;
+        border-radius: 10px;
+        box-shadow: none !important;
+    }
+    /* Tabs — clean text with underline */
+    button[data-baseweb="tab"] {
+        font-size: 14px !important;
+        font-weight: 500 !important;
+        color: #6b7280 !important;
+        padding: 12px 4px !important;
+        margin-right: 28px !important;
+    }
+    button[data-baseweb="tab"][aria-selected="true"] {
+        color: #1d4ed8 !important;
+    }
+    div[data-baseweb="tab-highlight"] { background-color: #1d4ed8 !important; }
+    div[data-baseweb="tab-border"] { background-color: #e5e7eb !important; }
+    /* Dataframe cleanup */
+    .stDataFrame { border: 1px solid #e5e7eb; border-radius: 8px; }
+    /* Code blocks for log feed */
+    .stCodeBlock { background: #f9fafb !important; border: 1px solid #e5e7eb; }
+    code { font-size: 12px !important; color: #374151 !important; }
+    /* Headings */
+    h1, h2, h3, h4 { color: #111827 !important; font-weight: 600 !important; }
+    /* Buttons */
+    .stButton button {
+        font-weight: 500 !important;
+        font-size: 13px !important;
+        border-radius: 8px !important;
+    }
+    /* Section header rule */
+    .kxw-section-header {
+        font-size: 11px;
+        letter-spacing: 1.5px;
+        color: #6b7280;
+        font-weight: 600;
+        text-transform: uppercase;
+        margin: 24px 0 10px 0;
+        border-bottom: 1px solid #e5e7eb;
+        padding-bottom: 8px;
+    }
+    /* Metric cards (custom) */
+    .kxw-metric {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 16px 18px;
+        height: 100%;
+    }
+    .kxw-metric .label {
+        font-size: 10px;
+        letter-spacing: 1.5px;
+        color: #6b7280;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    .kxw-metric .value {
+        font-size: 30px;
+        font-weight: 700;
+        color: #111827;
+        margin-top: 8px;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+        line-height: 1;
+    }
+    .kxw-metric .sub {
+        font-size: 11px;
+        color: #9ca3af;
+        margin-top: 8px;
+    }
+    /* Pill badge */
+    .kxw-pill {
+        display: inline-block;
+        padding: 3px 9px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+        margin-left: 6px;
+        vertical-align: middle;
+    }
+    .kxw-pill.live { background: #fef3c7; color: #92400e; }
+    .kxw-pill.healthy { background: #ecfdf5; color: #047857; }
+    .kxw-pill.down { background: #fef2f2; color: #b91c1c; }
+    .kxw-pill.unknown { background: #f3f4f6; color: #4b5563; }
+    .kxw-pill .dot { font-size: 10px; }
+    /* Header card icon */
+    .kxw-icon {
+        width: 44px; height: 44px;
+        background: #fef3c7;
+        border-radius: 10px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 22px;
+    }
+    /* Empty state */
+    .kxw-empty {
+        border: 1px dashed #d1d5db;
+        border-radius: 8px;
+        padding: 36px;
+        text-align: center;
+        color: #9ca3af;
+        font-size: 13px;
+        background: #ffffff;
+    }
+    /* Top bar timestamp */
+    .kxw-clock {
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+        font-size: 13px;
+        color: #374151;
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        padding: 6px 12px;
+        display: inline-block;
+    }
+    /* Action button - check status */
+    button[kind="primary"] {
+        background: #111827 !important;
+        color: #ffffff !important;
+        border: none !important;
+    }
+    button[kind="primary"]:hover {
+        background: #374151 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# Top bar: clock + refresh
+top_l, top_r = st.columns([10, 2])
+with top_r:
+    sub_l, sub_r = st.columns([1, 1])
+    with sub_l:
+        st.markdown(
+            f"<div class='kxw-clock' style='text-align:center;'>"
+            f"{datetime.now(ET).strftime('%I:%M:%S %p ET')}</div>",
+            unsafe_allow_html=True,
+        )
+    with sub_r:
+        if st.button("↻ Refresh", use_container_width=True, type="primary"):
+            st.cache_data.clear()
+            st.rerun()
+
+# Load data
 health = load_health_status()
 heartbeat = load_heartbeat()
-
-dot_color = "#16a34a" if health["healthy"] else "#dc2626"
-status_label = health["summary"]
-
 cycles_today = load_cycle_counts_today()
 metrics = load_today_metrics()
-
-with st.container(border=True):
-    h_cols = st.columns([0.1, 0.6, 0.3])
-    with h_cols[0]:
-        st.markdown(
-            "<div style='font-size:42px;text-align:center;'>🌡️</div>",
-            unsafe_allow_html=True,
-        )
-    with h_cols[1]:
-        st.markdown(
-            f"<h3 style='margin:0;'>Kalshi Weather Bot "
-            f"<span style='background:#fef3c7;color:#92400e;padding:2px 8px;"
-            f"border-radius:6px;font-size:12px;font-weight:600;margin-left:8px;'>"
-            f"LIVE</span> "
-            f"<span style='background:#f3f4f6;color:{dot_color};padding:2px 8px;"
-            f"border-radius:6px;font-size:12px;font-weight:600;margin-left:4px;'>"
-            f"● {status_label}</span></h3>"
-            f"<div style='color:#6b7280;font-size:13px;margin-top:4px;'>"
-            f"18 cities · HIGH + LOW · Mac launchd · "
-            f"last cycle {cycles_today['last_end_et']}</div>",
-            unsafe_allow_html=True,
-        )
-
-# ── Metric row ──
-st.markdown("&nbsp;")  # spacing
-m_cols = st.columns(6)
-def _metric_card(col, label: str, value: str, sub: str = "") -> None:
-    with col:
-        with st.container(border=True):
-            st.markdown(
-                f"<div style='color:#6b7280;font-size:10px;letter-spacing:1px;"
-                f"font-weight:600;'>{label}</div>"
-                f"<div style='font-size:28px;font-weight:700;margin-top:6px;"
-                f"font-family:monospace;'>{value}</div>"
-                f"<div style='color:#6b7280;font-size:11px;margin-top:4px;'>{sub}</div>",
-                unsafe_allow_html=True,
-            )
-
-_metric_card(m_cols[0], "CYCLES TODAY", str(cycles_today["ended"]),
-             f"{cycles_today['started']} started")
-_metric_card(m_cols[1], "AVG SPREAD °F",
-             f"{metrics['avg_spread_f']:.1f}" if metrics['avg_spread_f'] is not None else "—",
-             "forecast disagreement")
-hb_phase = heartbeat["phase"]
-hb_age = heartbeat["age_seconds"]
-hb_value = hb_phase
-hb_sub = f"{hb_age}s ago" if hb_age is not None else "no heartbeat"
-_metric_card(m_cols[2], "BOT HEARTBEAT", hb_value, hb_sub)
-_metric_card(m_cols[3], "OPEN POSITIONS", str(metrics["open_count"]),
-             f"${metrics['deployed_usd']:.2f} deployed")
-# Compute aggregate unrealized P&L from open positions
 positions_df = load_open_positions()
+
+# Compute aggregate unrealized P&L
 unrealized = 0.0
 if not positions_df.empty:
     for _, row in positions_df.iterrows():
@@ -504,18 +604,73 @@ if not positions_df.empty:
                 unrealized += float(v)
             except Exception:
                 pass
-pnl_color = "#16a34a" if unrealized >= 0 else "#dc2626"
-_metric_card(
-    m_cols[4], "NET P&L TODAY",
-    f"<span style='color:{pnl_color}'>${unrealized:+.2f}</span>",
-    "unrealized",
+
+# ── Header card ──
+health_class = "healthy" if health["healthy"] else ("down" if health["summary"] == "DOWN" else "unknown")
+health_dot_color = "#047857" if health["healthy"] else ("#b91c1c" if health["summary"] == "DOWN" else "#6b7280")
+
+st.markdown(
+    f"""
+    <div style='background:#fff;border:1px solid #e5e7eb;border-radius:10px;
+                padding:18px 22px;margin-bottom:18px;
+                display:flex;align-items:center;gap:16px;'>
+        <div class='kxw-icon'>🌡️</div>
+        <div style='flex:1;'>
+            <div style='font-size:18px;font-weight:600;color:#111827;line-height:1.2;'>
+                Kalshi Weather Bot
+                <span class='kxw-pill live'>LIVE</span>
+                <span class='kxw-pill {health_class}'>
+                    <span class='dot' style='color:{health_dot_color};'>●</span>
+                    {health["summary"]}
+                </span>
+            </div>
+            <div style='color:#6b7280;font-size:12px;margin-top:6px;'>
+                18 cities · HIGH + LOW · Mac launchd · last cycle {cycles_today["last_end_et"]}
+            </div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
-_metric_card(m_cols[5], "W / L", f"{metrics['wins']}W / {metrics['losses']}L",
-             "since 2026-05-17")
+
+# ── Metric row (custom HTML cards, not st.container) ──
+def _metric_html(label: str, value: str, sub: str, value_color: str | None = None) -> str:
+    color_style = f"color:{value_color};" if value_color else ""
+    return (
+        f"<div class='kxw-metric'>"
+        f"<div class='label'>{label}</div>"
+        f"<div class='value' style='{color_style}'>{value}</div>"
+        f"<div class='sub'>{sub}</div>"
+        f"</div>"
+    )
+
+avg_spread_str = (
+    f"{metrics['avg_spread_f']:.1f}"
+    if metrics["avg_spread_f"] is not None else "—"
+)
+hb_value = heartbeat["phase"]
+hb_sub = f"{heartbeat['age_seconds']}s ago" if heartbeat["age_seconds"] is not None else "no heartbeat"
+pnl_color = "#047857" if unrealized >= 0 else "#b91c1c"
+pnl_str = f"${unrealized:+.2f}"
+
+cards_html = (
+    "<div style='display:grid;grid-template-columns:repeat(6, 1fr);gap:14px;margin-bottom:8px;'>"
+    + _metric_html("CYCLES TODAY", str(cycles_today["ended"]),
+                   f"{cycles_today['started']} started")
+    + _metric_html("AVG SPREAD °F", avg_spread_str, "forecast disagreement")
+    + _metric_html("BOT HEARTBEAT", hb_value, hb_sub)
+    + _metric_html("OPEN POSITIONS", str(metrics["open_count"]),
+                   f"${metrics['deployed_usd']:.2f} deployed")
+    + _metric_html("NET P&L TODAY", pnl_str, "unrealized", value_color=pnl_color)
+    + _metric_html("W / L", f"{metrics['wins']}W / {metrics['losses']}L",
+                   "since 2026-05-17")
+    + "</div>"
+)
+st.markdown(cards_html, unsafe_allow_html=True)
 
 # ── Diagnostic button ──
-st.markdown("&nbsp;")
-diag_cols = st.columns([0.25, 0.75])
+st.markdown("<div style='margin-top:12px;'></div>", unsafe_allow_html=True)
+diag_cols = st.columns([0.22, 0.78])
 with diag_cols[0]:
     diag_clicked = st.button(
         "🔍 Check Bot Status",
@@ -525,24 +680,32 @@ with diag_cols[0]:
     )
 with diag_cols[1]:
     if diag_clicked:
-        # Force-refresh health data
         st.cache_data.clear()
         health = load_health_status()
         if health["healthy"]:
-            st.success(
-                f"**BOT HEALTHY** — {health.get('last_cycle_line', '')}",
-                icon="✅",
+            st.markdown(
+                f"<div style='background:#ecfdf5;border:1px solid #a7f3d0;"
+                f"border-radius:8px;padding:12px 16px;color:#065f46;font-size:13px;'>"
+                f"<strong>● BOT HEALTHY</strong> — {health.get('last_cycle_line', '')}"
+                f"</div>",
+                unsafe_allow_html=True,
             )
         elif health["summary"] == "DOWN":
-            st.error(
-                f"**BOT DOWN** — investigate immediately.\n\n"
-                f"```\n{health['raw']}\n```",
-                icon="🚨",
+            st.markdown(
+                f"<div style='background:#fef2f2;border:1px solid #fecaca;"
+                f"border-radius:8px;padding:12px 16px;color:#991b1b;font-size:13px;'>"
+                f"<strong>● BOT DOWN</strong> — investigate immediately.<br>"
+                f"<pre style='margin:8px 0 0 0;font-size:11px;color:#7f1d1d;"
+                f"white-space:pre-wrap;'>{health['raw']}</pre></div>",
+                unsafe_allow_html=True,
             )
         else:
-            st.warning(
-                f"**STATUS UNCLEAR**\n\n```\n{health['raw']}\n```",
-                icon="⚠️",
+            st.markdown(
+                f"<div style='background:#fffbeb;border:1px solid #fde68a;"
+                f"border-radius:8px;padding:12px 16px;color:#92400e;font-size:13px;'>"
+                f"<strong>● STATUS UNCLEAR</strong><br>"
+                f"<pre style='margin:8px 0 0 0;font-size:11px;'>{health['raw']}</pre></div>",
+                unsafe_allow_html=True,
             )
 
 # ── Tabs ──
@@ -550,27 +713,29 @@ tab_session, tab_cities, tab_history, tab_system = st.tabs([
     "Today's Session", "Cities", "Historical", "System Health"
 ])
 
-with tab_session:
-    st.markdown("### Latest Cycle Summary")
-    report_md = load_latest_cycle_report()
-    with st.container(border=True):
-        st.markdown(report_md)
+_section = lambda label: st.markdown(
+    f"<div class='kxw-section-header'>{label}</div>", unsafe_allow_html=True
+)
+_empty = lambda msg: st.markdown(
+    f"<div class='kxw-empty'>{msg}</div>", unsafe_allow_html=True
+)
 
-    st.markdown("### Open Positions")
-    if positions_df.empty:
-        st.info("No open positions today.")
+with tab_session:
+    _section("Latest cycle summary")
+    report_md = load_latest_cycle_report()
+    if report_md.strip().startswith("_"):
+        _empty(report_md.strip("_ "))
     else:
-        # Color-code P&L
-        def _color_pnl(val):
-            try:
-                v = float(val)
-                if v > 0:
-                    return f"color: #16a34a; font-weight: 600;"
-                if v < 0:
-                    return f"color: #dc2626; font-weight: 600;"
-            except Exception:
-                pass
-            return ""
+        st.markdown(
+            f"<div style='background:#fff;border:1px solid #e5e7eb;border-radius:10px;"
+            f"padding:18px 22px;'>{report_md}</div>",
+            unsafe_allow_html=True,
+        )
+
+    _section("Open positions")
+    if positions_df.empty:
+        _empty("No open positions today.")
+    else:
         display_df = positions_df.copy()
         display_df["P&L $"] = display_df["P&L"].apply(
             lambda v: f"${float(v):+.2f}" if v is not None else "—"
@@ -578,77 +743,72 @@ with tab_session:
         display_df = display_df[
             ["Ticker", "Side", "Entry", "Current Bid", "P&L $", "Engine", "Status"]
         ]
-        st.dataframe(
-            display_df, use_container_width=True, hide_index=True,
-        )
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    st.markdown("### Decision Breakdown — Today")
+    _section("Decision breakdown — today")
     breakdown = load_decision_breakdown_today()
     if breakdown:
         b_df = pd.DataFrame(
             sorted(breakdown.items(), key=lambda kv: -kv[1]),
             columns=["Decision", "Count"],
         )
-        st.dataframe(b_df, use_container_width=True, hide_index=True, height=200)
+        st.dataframe(b_df, use_container_width=True, hide_index=True, height=240)
     else:
-        st.info("No decisions saved yet today.")
+        _empty("No decisions saved yet today.")
 
-    st.markdown("### Live Event Feed (last 30 interesting lines)")
+    _section("Live event feed (last 30)")
     events = load_live_event_feed(30)
     if events:
-        with st.container(border=True):
-            st.code("\n".join(events), language=None)
+        st.code("\n".join(events), language=None)
     else:
-        st.info("No log activity yet.")
+        _empty("Event log empty for today. Will populate during cycles.")
 
 
 with tab_cities:
-    st.markdown("### Per-City Overview")
+    _section("Per-city overview")
     cities_df = load_city_overview()
     if cities_df.empty:
-        st.info("No city data yet.")
+        _empty("No city data yet.")
     else:
         st.dataframe(cities_df, use_container_width=True, hide_index=True)
 
 
 with tab_history:
-    st.markdown("### Past Daily Reports")
+    _section("Past daily reports")
     if REPORTS_DIR.exists():
         files = sorted(REPORTS_DIR.glob("*.md"), reverse=True)
         if not files:
-            st.info("No daily reports archived yet.")
+            _empty("No daily reports archived yet.")
         else:
             for fp in files[:14]:
                 with st.expander(fp.stem, expanded=(fp == files[0])):
                     st.markdown(fp.read_text())
     else:
-        st.info("Reports directory not found.")
+        _empty("Reports directory not found.")
 
 
 with tab_system:
-    st.markdown("### launchd Jobs")
+    _section("Launchd jobs")
     jobs = load_launchd_status()
     if jobs:
         st.dataframe(pd.DataFrame(jobs), use_container_width=True, hide_index=True)
     else:
-        st.warning("Could not query launchctl.")
+        _empty("Could not query launchctl.")
 
-    st.markdown("### Heartbeat File")
-    with st.container(border=True):
-        st.code(heartbeat["raw"], language=None)
+    _section("Heartbeat file")
+    st.code(heartbeat["raw"] or "(empty)", language=None)
 
-    st.markdown("### Watchdog Log Tail")
+    _section("Watchdog log tail")
     if WATCHDOG_LOG.exists():
         try:
             wd_lines = WATCHDOG_LOG.read_text().splitlines()[-20:]
-            with st.container(border=True):
-                st.code("\n".join(wd_lines) if wd_lines else "(empty)", language=None)
+            st.code("\n".join(wd_lines) if wd_lines else "(empty)", language=None)
         except Exception as exc:
-            st.error(f"watchdog log read failed: {exc}")
+            _empty(f"watchdog log read failed: {exc}")
     else:
-        st.info("No watchdog log yet.")
+        _empty("No watchdog log yet.")
 
-    st.markdown("### Schema Migrations Applied")
+    _section("Schema migrations applied")
     conn = _ro_connect()
     if conn:
         try:
@@ -662,24 +822,34 @@ with tab_system:
                 )
                 st.dataframe(mig_df, use_container_width=True, hide_index=True)
             else:
-                st.info("No migrations recorded.")
+                _empty("No migrations recorded.")
         except Exception as exc:
-            st.warning(f"schema_migrations query failed: {exc}")
+            _empty(f"schema_migrations query failed: {exc}")
         finally:
             conn.close()
 
-    st.markdown("### Ollama Daemon")
+    _section("Ollama daemon")
     try:
         ol = subprocess.run(
             ["curl", "-sf", "-m", "2", "http://localhost:11434/api/tags"],
             capture_output=True, text=True, timeout=4,
         )
         if ol.returncode == 0:
-            st.success("Ollama daemon: UP", icon="✅")
+            st.markdown(
+                "<div style='background:#ecfdf5;border:1px solid #a7f3d0;"
+                "border-radius:8px;padding:10px 14px;color:#065f46;font-size:13px;'>"
+                "<strong>● UP</strong> — AFD extraction is online</div>",
+                unsafe_allow_html=True,
+            )
         else:
-            st.error("Ollama daemon: DOWN (AFD extraction will silently degrade)", icon="🚨")
+            st.markdown(
+                "<div style='background:#fef2f2;border:1px solid #fecaca;"
+                "border-radius:8px;padding:10px 14px;color:#991b1b;font-size:13px;'>"
+                "<strong>● DOWN</strong> — AFD extraction will silently degrade</div>",
+                unsafe_allow_html=True,
+            )
     except Exception as exc:
-        st.warning(f"ollama check failed: {exc}")
+        _empty(f"ollama check failed: {exc}")
 
 
 # Footer note — explicit about read-only
