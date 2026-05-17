@@ -55,19 +55,36 @@ if [[ "$slot_ran" == "yes" ]]; then
     rm -f "$FLAG" "$FLAG.notified" 2>/dev/null
     echo "[$(ts)] RECOVERED (slot $slot_et ran)" >> "$WATCH_LOG"
   fi
-  # Sanity check the heartbeat — if it shows cycle_start but the most recent
-  # cycle_end in the log is older than the heartbeat, the wrapper may be
-  # hung. We still report this since it's a real failure mode.
+  # Stuck-cycle recovery: if the heartbeat says cycle_start but the cycle
+  # never finished within its budget (240s SIGALRM, plus 60s slack = 300s),
+  # the Python process may be blocked inside a C-level call that swallowed
+  # the alarm signal. Force-kill the recorded pid so the next slot can
+  # run. This is a real failure mode caught in production reliability lit.
   HEARTBEAT="$ROOT/logs/heartbeat.txt"
   if [[ -f "$HEARTBEAT" ]] && grep -q "phase=cycle_start" "$HEARTBEAT" 2>/dev/null; then
     hb_mtime=$(stat -f "%m" "$HEARTBEAT" 2>/dev/null || echo 0)
     now_epoch=$(date "+%s")
     age_sec=$(( now_epoch - hb_mtime ))
-    # cycle ought to take <240s; if we see cycle_start older than 300s
-    # without a cycle_end, that's a hung cycle.
     if (( age_sec > 300 )); then
-      "$REPORTER" "FAILED" "$slot_et" "stuck_cycle_start_age=${age_sec}s_heartbeat=$(cat $HEARTBEAT | tr '\n' ' ')" 2>>"$WATCH_LOG" || true
-      echo "[$(ts)] WARN: heartbeat shows cycle_start ${age_sec}s ago, no end" >> "$WATCH_LOG"
+      stuck_pid=$(grep -o "host_pid=[0-9]*" "$HEARTBEAT" | cut -d= -f2)
+      kill_result="none"
+      if [[ -n "$stuck_pid" ]] && kill -0 "$stuck_pid" 2>/dev/null; then
+        # First try SIGTERM (clean shutdown), then SIGKILL after 5s
+        kill -TERM "$stuck_pid" 2>/dev/null
+        sleep 5
+        if kill -0 "$stuck_pid" 2>/dev/null; then
+          kill -KILL "$stuck_pid" 2>/dev/null
+          kill_result="SIGKILL"
+        else
+          kill_result="SIGTERM"
+        fi
+        # Clear the stale lock file too so next cycle can run
+        rm -f "$ROOT/logs/cycle.lock"
+      else
+        kill_result="pid_gone"
+      fi
+      "$REPORTER" "FAILED" "$slot_et" "stuck_cycle_age=${age_sec}s_pid=${stuck_pid}_kill=${kill_result}" 2>>"$WATCH_LOG" || true
+      echo "[$(ts)] STUCK CYCLE: pid=$stuck_pid age=${age_sec}s kill=$kill_result" >> "$WATCH_LOG"
     fi
   fi
   exit 0
