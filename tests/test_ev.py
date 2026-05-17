@@ -66,7 +66,12 @@ class EdgeEstimateTest(unittest.TestCase):
             portfolio_risk_units_value=Decimal("1.2"),
         )
 
-        expected_fee = _fee_cost(Decimal("0.60"), Decimal("1"), 1) + _fee_cost(Decimal("0.70"), Decimal("1"), 1)
+        # Fee model: entry fee at execution price + 50% early-exit allowance.
+        # Changed from old round-trip-fee model; this test was updated 2026-05-17
+        # to match the production formula in engines/ev.py.
+        entry_fee = _fee_cost(Decimal("0.60"), Decimal("1"), 1)
+        early_exit_allowance = entry_fee * Decimal("0.50")
+        expected_fee = entry_fee + early_exit_allowance
         self.assertEqual(edge.fee_cost, expected_fee)
         self.assertGreater(edge.portfolio_haircut, Decimal("0"))
 

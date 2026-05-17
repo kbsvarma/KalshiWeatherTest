@@ -162,7 +162,10 @@ class QualificationGovernanceTest(unittest.TestCase):
             raw_edge=Decimal("0.1"),
             executable_ev=Decimal("0.1"),
             friction_to_edge_ratio=Decimal("0.2"),
-            portfolio_risk_units_value=Decimal("1.9"),
+            # Use 5.5 to exceed the new PORTFOLIO_RISK_LIMIT=5.0 (raised
+            # 2026-05-17 from 1.80 to match the multi-bracket-per-city era;
+            # see engines/risk.py for rationale).
+            portfolio_risk_units_value=Decimal("5.5"),
         )
         self.assertFalse(risk.exposure_ok)
         self.assertFalse(risk.correlation_ok)

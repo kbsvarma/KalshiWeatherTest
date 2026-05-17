@@ -219,8 +219,9 @@ def maybe_close_position(
             price_cents=current_sell_bid_cents, quantity=None, response=None,
         )
 
-    creds = _load_credentials()
-    if creds is None:
+    # Check creds only if we'd actually call the API (dry-run can simulate).
+    creds = _load_credentials() if not _is_dry_run() else None
+    if not _is_dry_run() and creds is None:
         return LiveExecutionResult(
             placed=False, dry_run=False, order_id=None,
             blocker_reason="kalshi_credentials_missing",

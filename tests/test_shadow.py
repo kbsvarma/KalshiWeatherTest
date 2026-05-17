@@ -42,24 +42,28 @@ class ShadowExecutionTest(unittest.TestCase):
             provenance_refs=(),
             module_versions={},
         )
+        # Updated 2026-05-17: p_model bumped 0.65 → 0.78 to pass the
+        # volume-grinder favorite floor (0.70) added since this test was
+        # originally written. The test's intent (verify partial-fill ratio)
+        # is preserved; only the gate-blocking p_model changed.
         edge = EdgeEstimate(
             market_ticker="M1",
             side="yes",
             quantity_fp=Decimal("1"),
-            p_model=Decimal("0.65"),
+            p_model=Decimal("0.78"),
             p_market_exec=Decimal("0.40"),
-            raw_edge=Decimal("0.25"),
+            raw_edge=Decimal("0.38"),
             fee_cost=Decimal("0.01"),
             slippage_cost=Decimal("0.02"),
             adverse_selection_penalty=Decimal("0.01"),
             total_friction=Decimal("0.04"),
-            friction_to_edge_ratio=Decimal("0.16"),
+            friction_to_edge_ratio=Decimal("0.10"),
             uncertainty_haircut=Decimal("0.20"),
             regime_haircut=Decimal("0.10"),
             portfolio_haircut=Decimal("0"),
-            edge_conf_adj=Decimal("0.18"),
-            executable_ev_per_contract=Decimal("0.14"),
-            executable_ev_total=Decimal("0.14"),
+            edge_conf_adj=Decimal("0.31"),
+            executable_ev_per_contract=Decimal("0.27"),
+            executable_ev_total=Decimal("0.27"),
         )
         with tempfile.TemporaryDirectory() as tempdir:
             store = SQLiteStateStore(f"{tempdir}/state.sqlite3")
