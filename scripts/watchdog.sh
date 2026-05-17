@@ -35,17 +35,42 @@ slot_et="${slot_et_display% *} ${slot_et_display##* } ET"
 # Compute the slot's UTC epoch
 slot_epoch=$(TZ="America/New_York" date -j -f "%Y-%m-%d %H:%M" "${slot_date} ${slot_hour_24}:${slot_min}" "+%s" 2>/dev/null || echo "")
 
-# Find the most recent cycle_end in the log AFTER the slot time
+# Find the most recent cycle_end in the log AFTER the slot time.
+# ALSO check if a cycle is CURRENTLY RUNNING for this slot via heartbeat —
+# cycles can take 5+ min when KXLOW + KXHIGH are both active (36 series),
+# and the watchdog used to false-alarm when the cycle was still running.
 slot_ran="no"
+HEARTBEAT="$ROOT/logs/heartbeat.txt"
 if [[ -n "$slot_epoch" ]]; then
   last_end_utc=$(grep "cycle end" "$LOG" 2>/dev/null | tail -1 | awk -F'[][]' '{print $2}')
   if [[ -n "$last_end_utc" ]]; then
     last_end_epoch=$(date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$last_end_utc" "+%s" 2>/dev/null || echo 0)
-    # Slot ran if a cycle ended between slot_time and now.
+    # Case A: cycle ended after slot — success
     if (( last_end_epoch >= slot_epoch )); then
       slot_ran="yes"
     fi
   fi
+  # Case B: cycle is currently in-flight for this slot. Heartbeat shows
+  # phase=cycle_start with utc timestamp >= slot time. Don't false-alarm.
+  if [[ "$slot_ran" == "no" && -f "$HEARTBEAT" ]]; then
+    if grep -q "phase=cycle_start" "$HEARTBEAT" 2>/dev/null; then
+      hb_utc=$(grep "^utc=" "$HEARTBEAT" | head -1 | cut -d= -f2)
+      if [[ -n "$hb_utc" ]]; then
+        hb_epoch=$(date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$hb_utc" "+%s" 2>/dev/null || echo 0)
+        # cycle_start within the last 6 min counts as "in progress"
+        now_epoch=$(date "+%s")
+        if (( hb_epoch >= slot_epoch && (now_epoch - hb_epoch) < 360 )); then
+          slot_ran="in_progress"
+        fi
+      fi
+    fi
+  fi
+fi
+
+# If cycle is still running, exit quietly — no false alarm.
+if [[ "$slot_ran" == "in_progress" ]]; then
+  echo "[$(ts)] slot=$slot_et cycle in progress (heartbeat fresh), no action" >> "$WATCH_LOG"
+  exit 0
 fi
 
 if [[ "$slot_ran" == "yes" ]]; then

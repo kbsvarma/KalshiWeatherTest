@@ -24,7 +24,15 @@ from kalshi_weather.engines.afd_extractor import extract_afd_signals_cached
 # A hung HTTP call or a single city raising an unhandled exception used to
 # kill the entire cycle. With these limits each city is isolated and the
 # cycle has a hard ceiling so it can never overlap the next scheduled slot.
-MAX_CYCLE_SECONDS = 240  # 4 min hard cap before SIGALRM aborts the cycle
+MAX_CYCLE_SECONDS = 360  # 6 min — raised 2026-05-17 after KXLOW activation
+                          # doubled markets from 108 to ~456. Was 240; cycles
+                          # were hitting 311s. Real fix is parallelization
+                          # (see notes/scientific_roadmap.md T3.8), this
+                          # raised ceiling buys time without that refactor.
+                          # Note: Python's SIGALRM can be swallowed by C-level
+                          # blocking HTTP calls, so this ceiling is best-effort
+                          # — the watchdog's stuck-cycle SIGKILL is the
+                          # belt-and-suspenders enforcement.
 MAX_CITY_SECONDS = 30    # soft per-city budget enforced via wall-clock check
 
 
