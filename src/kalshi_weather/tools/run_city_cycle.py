@@ -253,23 +253,38 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
     if qualification is None:
         return None
 
-    # T1.3 persistence baseline — look up yesterday's actual settlement high
-    # for this city. The path engine widens uncertainty when the ensemble
-    # mean is >5°F from yesterday (regime in transition).
-    # Gracefully None when settlement isn't on file yet (e.g. cold start,
-    # early morning before NWS CLI is available).
+    # T1.3 persistence baseline — looked up PER MARKET because settlement
+    # date varies (today's market vs tomorrow's scouting market need
+    # different "yesterday" anchors). Defined as a closure so the per-market
+    # loop can call it cheaply with the market_date in scope.
     from decimal import Decimal as _D
-    yesterday_high_f: _D | None = None
-    try:
+
+    def _yesterday_high_for_market(market_settle_date) -> _D | None:
+        """Return yesterday-relative-to-market-settlement high in °F, or None.
+
+        For today's market: yesterday = today-1, settlement is on file.
+        For tomorrow's market: yesterday = today, hasn't settled yet → None.
+        Past markets: shouldn't happen, but return None defensively.
+        """
+        if market_settle_date is None:
+            return None
         local_today = datetime.now(ZoneInfo(station.timezone)).date()
-        yesterday = (local_today - timedelta(days=1)).isoformat()
-        settlement = state_store.get_market_settlement(city_profile.city_id, yesterday)
-        if settlement:
-            raw_high = settlement.get("daily_high_f")
-            if raw_high is not None:
-                yesterday_high_f = _D(str(raw_high))
-    except Exception as exc:  # observational only — never fatal
-        print(f"[WARN] persistence lookup failed for {city_profile.city_id}: {exc}")
+        if market_settle_date <= local_today - timedelta(days=1):
+            return None
+        # Look up (market_settle_date - 1)
+        anchor_date = (market_settle_date - timedelta(days=1)).isoformat()
+        try:
+            settlement = state_store.get_market_settlement(
+                city_profile.city_id, anchor_date
+            )
+            if settlement:
+                raw_high = settlement.get("daily_high_f")
+                if raw_high is not None:
+                    return _D(str(raw_high))
+        except Exception as exc:  # observational only — never fatal
+            print(f"[WARN] persistence lookup failed for "
+                  f"{city_profile.city_id} {anchor_date}: {exc}")
+        return None
 
     obs_adapter = NwsObservationAdapter(nws_client, station, limit=4)
     obs_raw = obs_adapter.fetch_raw()
@@ -357,7 +372,7 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
                 open_positions=decision_open_positions,
                 open_position_signals=decision_open_position_signals,
                 active_kill_switch=active_kill_switch,
-                yesterday_high_f=yesterday_high_f,
+                yesterday_high_f=_yesterday_high_for_market(market_date),
             )
         except SettlementRuleParseError:
             continue
