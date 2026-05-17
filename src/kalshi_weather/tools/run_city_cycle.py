@@ -39,6 +39,104 @@ def _install_cycle_timeout(seconds: int) -> None:
     signal.alarm(seconds)
 
 
+def _maybe_close_if_underwater(
+    *,
+    state_store,
+    market_ticker: str,
+    orderbook,
+    city_id: str,
+) -> None:
+    """If we own this market and selling now would be a loss, close.
+
+    Idempotent — safe to call from inside the per-market loop. Looks up
+    the most recent PLACED live order for the ticker, computes pnl vs
+    the top opposite-side bid, and if pnl < 0 places a sell IOC. We do
+    NOT close profitable positions on EXIT signals (let them ride).
+    """
+    import json as _json
+    from decimal import Decimal as _D
+    # Find the most recent PLACED live order for this ticker
+    try:
+        with state_store._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM live_orders "
+                "WHERE market_ticker = ? AND status LIKE 'PLACED_%' "
+                "AND status NOT LIKE 'CLOSED_%' "
+                "ORDER BY created_at DESC LIMIT 1",
+                (market_ticker,),
+            ).fetchone()
+    except Exception:
+        return
+    if not row:
+        return  # not held, or already closed
+    payload = _json.loads(row[0])
+    if payload.get("close_intent"):
+        return  # this row IS a close — skip
+    side_held = payload.get("side")
+    if side_held not in ("yes", "no"):
+        return
+    entry_price_cents = int(payload.get("yes_price") or payload.get("no_price") or 0)
+    if entry_price_cents <= 0:
+        return
+    # Already closed earlier today?
+    try:
+        with state_store._connect() as conn:
+            closed_row = conn.execute(
+                "SELECT count(*) FROM live_orders "
+                "WHERE market_ticker = ? AND status LIKE 'CLOSED_%'",
+                (market_ticker,),
+            ).fetchone()
+        if closed_row and int(closed_row[0]) > 0:
+            return
+    except Exception:
+        pass
+
+    # Best bid on the side we hold (= the price we could SELL at)
+    try:
+        bids = orderbook.yes_bids_ladder if side_held == "yes" else orderbook.no_bids_ladder
+    except Exception:
+        return
+    if not bids:
+        return
+    try:
+        best_bid_dollars = max(_D(str(price)) for price, _qty in bids)
+    except Exception:
+        return
+    best_bid_cents = int(round(float(best_bid_dollars) * 100))
+    if best_bid_cents <= 0 or best_bid_cents > 99:
+        return
+
+    # Only close if underwater. Profit positions ride to settlement (or
+    # future profit-taking rule). pnl per contract in cents:
+    pnl_cents = best_bid_cents - entry_price_cents
+    if pnl_cents >= 0:
+        return  # in profit — hold
+
+    # Underwater + EXIT signal → close to limit further downside
+    from kalshi_weather.engines.live_execution import maybe_close_position
+    res = maybe_close_position(
+        store=state_store,
+        market_ticker=market_ticker,
+        side_held=side_held,
+        entry_price_cents=entry_price_cents,
+        current_sell_bid_cents=best_bid_cents,
+    )
+    if res.placed:
+        print(f"[EXIT-EXEC] ✓ CLOSED {market_ticker} {side_held} "
+              f"@ {best_bid_cents}c (entry {entry_price_cents}c, "
+              f"pnl {pnl_cents}c)")
+        # Mark shadow_position as closed so it doesn't keep firing EXIT
+        try:
+            state_store.delete_shadow_position(city_id, market_ticker)
+        except Exception:
+            pass
+    elif res.dry_run:
+        print(f"[EXIT-EXEC] DRY-RUN close preview {market_ticker} "
+              f"{side_held} @ {best_bid_cents}c (entry {entry_price_cents}c)")
+    elif res.blocker_reason and res.blocker_reason != "live_orders_disabled_via_env":
+        print(f"[EXIT-EXEC] BLOCKED {market_ticker}: {res.blocker_reason}")
+
+
 def _preflight(state_store, kalshi_client, *, live_enabled: bool) -> list[str]:
     """Return list of preflight failure reasons. Empty list = healthy."""
     failures: list[str] = []
@@ -76,7 +174,7 @@ def _preflight(state_store, kalshi_client, *, live_enabled: bool) -> list[str]:
     return failures
 from kalshi_weather.domain.enums import RunMode
 from kalshi_weather.engines import apply_shadow_decision, run_market_decision_cycle
-from kalshi_weather.engines.live_execution import maybe_place_live_order
+from kalshi_weather.engines.live_execution import maybe_close_position, maybe_place_live_order
 from kalshi_weather.analytics import build_provider_reliability_report, extract_provider_reliability_weights
 from kalshi_weather.analytics.recommendation_log import record_recommendation
 from kalshi_weather.ingestion.adapters import (
@@ -381,6 +479,24 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
             print(f"[WARN] market {market_snapshot.market_ticker} failed: {exc}")
             continue
         state_store.save_decision(result.explanation)
+
+        # ── Position exit check ──────────────────────────────────────
+        # If the engine emits EXIT for a market we own AND we're currently
+        # underwater (sell now would be a loss), close to avoid a bigger
+        # loss at settlement. If we're in profit on an EXIT signal we hold
+        # (let the position ride — current policy, can revisit).
+        if result.explanation.final_decision.value == "EXIT":
+            try:
+                _maybe_close_if_underwater(
+                    state_store=state_store,
+                    market_ticker=market_snapshot.market_ticker,
+                    orderbook=orderbook,
+                    city_id=city_profile.city_id,
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"[EXIT-EXEC] WARN: exit check failed for "
+                      f"{market_snapshot.market_ticker}: {exc}")
+
         recommendation_id: str | None = None
         try:
             from kalshi_weather.settlement.rule_parser import parse_settlement_rule

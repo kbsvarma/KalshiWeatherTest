@@ -187,6 +187,107 @@ def _record_live_order(
         print(f"[LIVE-EXEC] WARN: failed to save live_orders row for {market_ticker}: {exc}")
 
 
+def maybe_close_position(
+    *,
+    store: SQLiteStateStore,
+    market_ticker: str,
+    side_held: str,
+    entry_price_cents: int,
+    current_sell_bid_cents: int,
+) -> LiveExecutionResult:
+    """Close an open position by submitting a sell IOC order.
+
+    Called when the decision engine emits EXIT for a market we own AND
+    selling now would lock in a loss smaller than holding to settlement
+    risk would (caller is responsible for that judgement). This function
+    just executes the close; it does not decide whether to.
+
+    side_held: 'yes' or 'no' — what we're holding.
+    entry_price_cents / current_sell_bid_cents: in cents (1..99).
+    """
+    if not _live_orders_enabled():
+        return LiveExecutionResult(
+            placed=False, dry_run=False, order_id=None,
+            blocker_reason="live_orders_disabled_via_env",
+            price_cents=None, quantity=None, response=None,
+        )
+
+    if current_sell_bid_cents < 1 or current_sell_bid_cents > 99:
+        return LiveExecutionResult(
+            placed=False, dry_run=False, order_id=None,
+            blocker_reason=f"close_price_out_of_range ({current_sell_bid_cents}c)",
+            price_cents=current_sell_bid_cents, quantity=None, response=None,
+        )
+
+    creds = _load_credentials()
+    if creds is None:
+        return LiveExecutionResult(
+            placed=False, dry_run=False, order_id=None,
+            blocker_reason="kalshi_credentials_missing",
+            price_cents=current_sell_bid_cents, quantity=None, response=None,
+        )
+
+    client_order_id = f"kxw_close_{uuid4().hex[:16]}"
+    order_payload = {
+        "ticker": market_ticker,
+        "client_order_id": client_order_id,
+        "side": side_held,
+        "action": "sell",
+        "type": "limit",
+        # Hit the top bid — IOC so we don't sit at risk if liquidity moves.
+        ("yes_price" if side_held == "yes" else "no_price"): current_sell_bid_cents,
+        "count": 1,
+        "time_in_force": "immediate_or_cancel",
+    }
+
+    if _is_dry_run():
+        _record_live_order(
+            store, market_ticker=market_ticker,
+            payload={**order_payload, "close_intent": True,
+                     "entry_price_cents": entry_price_cents},
+            status="DRY_RUN_CLOSE_PREVIEW",
+        )
+        return LiveExecutionResult(
+            placed=False, dry_run=True, order_id=client_order_id,
+            blocker_reason=None, price_cents=current_sell_bid_cents,
+            quantity=1, response=None,
+        )
+
+    client = KalshiPrivateClient(creds)
+    try:
+        resp = client.create_order(order_payload)
+    except Exception as exc:
+        error_text = str(exc)
+        _record_live_order(
+            store, market_ticker=market_ticker,
+            payload={**order_payload, "close_intent": True,
+                     "entry_price_cents": entry_price_cents,
+                     "error": error_text},
+            status="CLOSE_ERROR",
+        )
+        return LiveExecutionResult(
+            placed=False, dry_run=False, order_id=client_order_id,
+            blocker_reason=f"kalshi_api_error: {error_text[:120]}",
+            price_cents=current_sell_bid_cents, quantity=1, response=None,
+        )
+
+    order = resp.get("order") if isinstance(resp, dict) else {}
+    order_status = order.get("status", "unknown") if isinstance(order, dict) else "unknown"
+    _record_live_order(
+        store, market_ticker=market_ticker,
+        payload={**order_payload, "close_intent": True,
+                 "entry_price_cents": entry_price_cents,
+                 "kalshi_order_id": order.get("order_id") if isinstance(order, dict) else None,
+                 "kalshi_status": order_status, "response": resp},
+        status=f"CLOSED_{order_status.upper()}",
+    )
+    return LiveExecutionResult(
+        placed=True, dry_run=False, order_id=client_order_id,
+        blocker_reason=None, price_cents=current_sell_bid_cents,
+        quantity=1, response=resp,
+    )
+
+
 def maybe_place_live_order(
     *,
     store: SQLiteStateStore,
