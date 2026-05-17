@@ -13,6 +13,7 @@ Run: PYTHONPATH=src streamlit run scripts/dashboard.py
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import statistics
@@ -859,38 +860,120 @@ st.markdown(cards_html, unsafe_allow_html=True)
 #     health badge in the header card. No dedicated centered button.) ──
 qp = st.query_params
 diag_active = qp.get("diag") == "1"
-if diag_active:
-    # Force-refresh cached health status so the click triggers a fresh check
+# ── Handle "Run Cycle Now" action (?run=1 URL param) ──
+# This is the ONLY write-side action in the dashboard. It does not modify
+# the DB, kill the bot, or change config. It only asks launchd to fire
+# the scheduled cycle job immediately instead of waiting for the next
+# :00 or :30 slot. The cycle itself runs its normal logic; this just
+# changes WHEN it runs, not WHAT it does.
+run_requested = qp.get("run") == "1"
+run_result_msg: str | None = None
+run_result_ok = False
+if run_requested:
+    try:
+        r = subprocess.run(
+            ["launchctl", "kickstart", "-k",
+             f"gui/{os.getuid() if hasattr(os, 'getuid') else 501}/com.varmakammili.kalshi.weather.cycle"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode == 0:
+            run_result_msg = "Cycle kicked — will start within a few seconds. Refresh in ~2 min to see results."
+            run_result_ok = True
+        else:
+            run_result_msg = f"launchctl returned {r.returncode}: {(r.stderr or r.stdout or '').strip()[:200]}"
+    except Exception as exc:
+        run_result_msg = f"failed to kick cycle: {exc}"
+
+if diag_active or run_requested:
+    # Force-refresh cached health status so the panel reflects current state
     st.cache_data.clear()
     health = load_health_status()
+    fresh_heartbeat = load_heartbeat()
+    check_time_et = datetime.now(ET).strftime("%I:%M:%S %p ET")
+
+    # Compute next scheduled cycle (every 30 min at :00 and :30 ET)
+    now_et = datetime.now(ET)
+    next_min = 30 if now_et.minute < 30 else 0
+    next_hr = now_et.hour if now_et.minute < 30 else (now_et.hour + 1) % 24
+    next_cycle_et = now_et.replace(hour=next_hr, minute=next_min, second=0, microsecond=0)
+    if next_cycle_et <= now_et:
+        next_cycle_et = next_cycle_et + timedelta(hours=1)
+    minutes_to_next = max(0, int((next_cycle_et - now_et).total_seconds() / 60))
+    next_cycle_str = f"{next_cycle_et.strftime('%I:%M %p ET')} ({minutes_to_next} min)"
+
+    # Heartbeat details
+    hb_phase = fresh_heartbeat.get("phase", "unknown")
+    hb_age = fresh_heartbeat.get("age_seconds")
+    hb_age_str = f"{hb_age}s ago" if hb_age is not None else "unknown"
+
     if health["healthy"]:
         banner_bg, banner_border, banner_color = "#ecfdf5", "#a7f3d0", "#065f46"
         banner_title = "● BOT HEALTHY"
-        banner_body = health.get("last_cycle_line", "")
+        body_rows = [
+            ("Last completed cycle", health.get("last_cycle_line", "—").replace("✓ LAST CYCLE: ", "")),
+            ("Heartbeat", f"phase={hb_phase}, {hb_age_str}"),
+            ("Next scheduled cycle", next_cycle_str),
+        ]
     elif health["summary"] == "DOWN":
         banner_bg, banner_border, banner_color = "#fef2f2", "#fecaca", "#991b1b"
         banner_title = "● BOT DOWN"
-        banner_body = (
-            f"<pre style='margin:8px 0 0 0;font-size:11px;color:#7f1d1d;"
-            f"white-space:pre-wrap;'>{health['raw']}</pre>"
-        )
+        body_rows = [
+            ("Heartbeat", f"phase={hb_phase}, {hb_age_str}"),
+            ("Healthcheck output", f"<pre style='margin:4px 0 0 0;font-size:11px;color:#7f1d1d;white-space:pre-wrap;'>{health['raw']}</pre>"),
+        ]
     else:
         banner_bg, banner_border, banner_color = "#fffbeb", "#fde68a", "#92400e"
         banner_title = "● STATUS UNCLEAR"
-        banner_body = (
-            f"<pre style='margin:8px 0 0 0;font-size:11px;'>{health['raw']}</pre>"
+        body_rows = [
+            ("Heartbeat", f"phase={hb_phase}, {hb_age_str}"),
+            ("Output", f"<pre style='margin:4px 0 0 0;font-size:11px;'>{health['raw']}</pre>"),
+        ]
+
+    rows_html = "".join(
+        f"<div style='display:flex;gap:12px;margin-top:6px;'>"
+        f"<span style='font-weight:600;min-width:160px;'>{k}</span>"
+        f"<span>{v}</span></div>"
+        for k, v in body_rows
+    )
+
+    # "Run Cycle Now" action link + "Close" link in the top-right of the banner
+    actions_html = (
+        f"<a href='?run=1' target='_self' "
+        f"onclick='window.location.href = window.location.pathname + \"?run=1\"; return false;' "
+        f"style='color:{banner_color};text-decoration:none;font-size:11px;"
+        f"font-weight:600;padding:3px 10px;border:1px solid {banner_border};"
+        f"border-radius:6px;margin-right:10px;cursor:pointer;'>▶ Run Cycle Now</a>"
+        f"<a href='?' target='_self' "
+        f"onclick='window.location.href = window.location.pathname; return false;' "
+        f"style='color:{banner_color};text-decoration:none;"
+        f"font-size:11px;opacity:0.7;cursor:pointer;'>✕ close</a>"
+    )
+
+    # If a run was just requested, show its result inline ABOVE the live-check rows
+    run_html = ""
+    if run_requested and run_result_msg:
+        run_bg = "#ecfdf5" if run_result_ok else "#fef2f2"
+        run_color = "#065f46" if run_result_ok else "#991b1b"
+        icon = "✓" if run_result_ok else "✗"
+        run_html = (
+            f"<div style='background:{run_bg};border:1px solid {banner_border};"
+            f"border-radius:6px;padding:8px 12px;margin:8px 0 4px 0;"
+            f"color:{run_color};font-size:12px;'>"
+            f"<strong>{icon} Run Cycle Now:</strong> {run_result_msg}</div>"
         )
+
     st.markdown(
         f"<div style='background:{banner_bg};border:1px solid {banner_border};"
         f"border-radius:8px;padding:14px 20px;color:{banner_color};"
         f"font-size:13px;margin:0 0 18px 0;'>"
         f"<div style='display:flex;justify-content:space-between;align-items:center;'>"
-        f"<strong>{banner_title}</strong>"
-        f"<a href='?' target='_self' "
-        f"onclick='window.location.href = window.location.pathname; return false;' "
-        f"style='color:{banner_color};text-decoration:none;"
-        f"font-size:11px;opacity:0.7;cursor:pointer;'>✕ close</a></div>"
-        f"<div style='margin-top:6px;'>{banner_body}</div></div>",
+        f"<div><strong>{banner_title}</strong>"
+        f"<span style='font-size:11px;font-weight:400;margin-left:10px;opacity:0.7;'>"
+        f"live check at {check_time_et}</span></div>"
+        f"<div>{actions_html}</div></div>"
+        f"{run_html}"
+        f"<div style='margin-top:8px;'>{rows_html}</div>"
+        f"</div>",
         unsafe_allow_html=True,
     )
 
