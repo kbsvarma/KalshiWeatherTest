@@ -196,6 +196,22 @@ class SQLiteStateStore:
                     ON market_recommendations(counterfactual_resolved, as_of_time);
                 CREATE INDEX IF NOT EXISTS idx_settlements_city_date
                     ON market_settlements(city_id, local_date);
+                CREATE TABLE IF NOT EXISTS provider_errors (
+                    error_id TEXT PRIMARY KEY,
+                    provider_id TEXT NOT NULL,
+                    city_id TEXT NOT NULL,
+                    market_ticker TEXT NOT NULL,
+                    settlement_date TEXT NOT NULL,
+                    season TEXT NOT NULL,
+                    predicted_high_f REAL NOT NULL,
+                    actual_high_f REAL NOT NULL,
+                    abs_error_f REAL NOT NULL,
+                    decision_as_of_time TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_provider_errors_city_provider
+                    ON provider_errors(city_id, provider_id, settlement_date DESC);
+                CREATE INDEX IF NOT EXISTS idx_provider_errors_city_season
+                    ON provider_errors(city_id, season, settlement_date DESC);
                 """
             )
             # Schema migration: add signal-timing/context columns to

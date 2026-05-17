@@ -76,7 +76,19 @@ def fetch_one(
             "climate_product_id": snapshot.climate_product_id,
         },
     )
-    return True, f"saved high={high_f} low={low_f}"
+    # T2.3: compute per-provider error rows so EWMA weights can converge
+    # over time. Non-fatal; never breaks settlement save.
+    try:
+        from kalshi_weather.analytics.provider_performance import (
+            record_provider_errors_from_settlement,
+        )
+        n = record_provider_errors_from_settlement(
+            store, city_id=city_id, local_date=target_date.isoformat(),
+            actual_high_f=high_f,
+        )
+        return True, f"saved high={high_f} low={low_f} (provider_errors: {n} rows)"
+    except Exception as exc:
+        return True, f"saved high={high_f} low={low_f} (provider_errors skipped: {exc})"
 
 
 def main() -> None:
@@ -141,6 +153,17 @@ def main() -> None:
                 saved += 1
 
     print(f"\nDone. Saved: {saved}, Skipped (already-present): {skipped}")
+
+    # T2.5: refit isotonic calibration if we have enough data. Non-fatal.
+    try:
+        from kalshi_weather.analytics.probability_calibration import fit_and_cache
+        cache = fit_and_cache(store)
+        if cache:
+            print(f"[T2.5] isotonic refit ok, n={cache['sample_count']}")
+        else:
+            print(f"[T2.5] isotonic skipped (insufficient samples)")
+    except Exception as exc:
+        print(f"[T2.5] isotonic refit failed (non-fatal): {exc}")
 
 
 if __name__ == "__main__":

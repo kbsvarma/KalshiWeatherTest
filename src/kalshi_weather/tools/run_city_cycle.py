@@ -398,6 +398,24 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
         print(f"[SPC] {city_profile.city_id}: category={spc_for_station.category} "
               f"rank={spc_for_station.rank} ok={spc_for_station.fetched_ok}")
 
+    # GOES proxy — surface the real-time sky_cover_code from NWS METAR
+    # observations (already ingested). This is NOT true GOES satellite
+    # imagery; it's the airport-station cloud observation, which is
+    # what feeds METAR and what GOES is regridded to anyway. Free, no new
+    # API. If the user wants true GOES (netCDF + AWS S3 + regridding to
+    # station lat/lon), that's a follow-up.
+    try:
+        recent_obs = state_store.get_recent_observations(station.station_id, limit=1)
+        if recent_obs:
+            sky_code = recent_obs[0].sky_cover_code
+            obs_pct_map = {"CLR": 0, "FEW": 25, "SCT": 50, "BKN": 75, "OVC": 100}
+            obs_pct = obs_pct_map.get(sky_code, None)
+            print(f"[GOES-PROXY] {city_profile.city_id}: sky={sky_code} "
+                  f"(~{obs_pct}% cover)" if obs_pct is not None
+                  else f"[GOES-PROXY] {city_profile.city_id}: sky={sky_code} (unknown code)")
+    except Exception:
+        pass
+
     # Soil moisture (single Open-Meteo call, near-surface)
     try:
         soil = open_meteo_client.fetch_soil_moisture(

@@ -231,6 +231,15 @@ def apply_path_adjustment(
         p_model=p_yes, p_climatology=p_climatology
     )
 
+    # T2.5 isotonic recalibration — maps raw p_yes to empirical hit rate
+    # learned from settled bets. Identity until 50+ settled samples exist.
+    # Wrapped in try so cache parse errors never block decisions.
+    try:
+        from kalshi_weather.analytics.probability_calibration import apply_calibration
+        p_yes, _calibrated = apply_calibration(p_yes)
+    except Exception:
+        pass
+
     base_path_uncertainty_addon = (
         (Decimal("0.15") * (Decimal("1") - reachability_score))
         + (Decimal("0.10") * (Decimal("1") - decay_factor))
