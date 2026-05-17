@@ -10,6 +10,35 @@ from kalshi_weather.domain.enums import QualificationState
 from kalshi_weather.domain.models import CityQualificationState
 
 NOWCAST_SHADOW_NEAR_BASELINE_TOLERANCE = Decimal("1.03")
+# 2026-05-17 fix: nowcast-baseline failure alone is NOT enough to demote.
+# The qualification engine was over-gating on nowcast skill (predicting
+# next-hour temperature) when our trades settle on the DAILY HIGH. NYC
+# was being demoted despite having the most accurate NWS daily-high
+# forecast in the fleet (1.89°F MAE vs 2.70°F average).
+# Now: nowcast failure only triggers demotion if the best available
+# daily-high forecast provider ALSO has weak MAE (>5°F). If even one
+# provider is good, we have a usable signal and stay in shadow.
+BEST_PROVIDER_MAE_DEMOTE_THRESHOLD_F = Decimal("5.0")
+
+
+def _settlement_signal_is_weak(
+    settlement_error_summary: dict[str, object] | None,
+) -> bool:
+    """Return True if the city's best-available daily-high forecast
+    provider has MAE > the demotion threshold. Returns False (= signal
+    is OK) when data is insufficient — we don't punish young data."""
+    if not settlement_error_summary:
+        return False
+    n = int(settlement_error_summary.get("sample_count") or 0)
+    if n < 10:  # too few samples — don't gate on this
+        return False
+    best_mae = settlement_error_summary.get("best_provider_mae_f")
+    if best_mae is None:
+        return False
+    try:
+        return Decimal(str(best_mae)) > BEST_PROVIDER_MAE_DEMOTE_THRESHOLD_F
+    except Exception:
+        return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +87,7 @@ def recommend_qualification_update(
     profile: str = STRICT_PRODUCTION_PROFILE,
     decision_payloads: list[dict[str, object]] | None = None,
     position_history_payloads: list[dict[str, object]] | None = None,
+    settlement_error_summary: dict[str, object] | None = None,
     settlement_summary: dict[str, object] | None = None,
     nowcast_report: dict[str, object] | None = None,
     calibration_report: dict[str, object] | None = None,
@@ -115,10 +145,15 @@ def recommend_qualification_update(
                 ("observation_lag_unstable",),
                 scorecard,
             )
-        if _nowcast_material_failure(nowcast_report):
+        # Only demote on nowcast failure when daily-high forecast is ALSO weak.
+        # NYC's nowcast underperforms persistence but its daily-high MAE is
+        # the best in the fleet; the old gate was over-aggressive.
+        if _nowcast_material_failure(nowcast_report) and _settlement_signal_is_weak(
+            settlement_error_summary
+        ):
             return QualificationUpdate(
                 QualificationState.OBSERVE_ONLY,
-                ("nowcast_baseline_failure",),
+                ("nowcast_baseline_failure_and_settlement_weak",),
                 scorecard,
             )
         if (
@@ -167,17 +202,49 @@ def recommend_qualification_update(
             scorecard,
         )
 
-    if settled_validation_count < 50:
+    # 2026-05-17 fix: don't demote on missing settlement_validations entries
+    # when we have strong provider_errors evidence the city forecasts work.
+    # The 10 cities added in May had 0 corpus entries (original 8 had 100)
+    # which was conflating "no corpus built" with "validation failed".
+    # We demote only if BOTH the legacy corpus is thin AND the actual
+    # daily-high forecast MAE is weak.
+    if settled_validation_count < 50 and _settlement_signal_is_weak(
+        settlement_error_summary
+    ):
         return QualificationUpdate(
             QualificationState.OBSERVE_ONLY,
-            ("settlement_validation_below_50",),
+            ("settlement_validation_below_50_and_forecast_weak",),
+            scorecard,
+        )
+    if (
+        settled_validation_count < 50
+        and (not settlement_error_summary
+             or int(settlement_error_summary.get("sample_count") or 0) < 10)
+    ):
+        # No corpus AND no real settlements yet — can't confirm reliability.
+        # Stay in shadow rather than demoting to observe-only.
+        return QualificationUpdate(
+            QualificationState.SHADOW_ONLY,
+            ("settlement_validation_pending",),
             scorecard,
         )
 
-    if not settlement_ready:
+    # Same logic as the count gate above — if the legacy validation corpus
+    # isn't built but real provider_errors look fine, stay in shadow.
+    if not settlement_ready and _settlement_signal_is_weak(settlement_error_summary):
         return QualificationUpdate(
             QualificationState.OBSERVE_ONLY,
-            ("settlement_validation_incomplete",),
+            ("settlement_validation_incomplete_and_forecast_weak",),
+            scorecard,
+        )
+    if (
+        not settlement_ready
+        and (not settlement_error_summary
+             or int(settlement_error_summary.get("sample_count") or 0) < 10)
+    ):
+        return QualificationUpdate(
+            QualificationState.SHADOW_ONLY,
+            ("settlement_validation_pending",),
             scorecard,
         )
 
@@ -210,10 +277,14 @@ def recommend_qualification_update(
             scorecard,
         )
 
-    if _nowcast_material_failure(nowcast_report):
+    # Same gate as above for non-NYC profiles: only treat nowcast failure
+    # as a shadow probe trigger if daily-high signal is ALSO weak.
+    if _nowcast_material_failure(nowcast_report) and _settlement_signal_is_weak(
+        settlement_error_summary
+    ):
         return QualificationUpdate(
             QualificationState.SHADOW_ONLY,
-            ("nowcast_baseline_shadow_probe",),
+            ("nowcast_baseline_shadow_probe_and_settlement_weak",),
             scorecard,
         )
 

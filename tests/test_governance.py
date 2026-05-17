@@ -63,6 +63,10 @@ class QualificationGovernanceTest(unittest.TestCase):
             promotion_reasons=(),
             demotion_reasons=(),
         )
+        # Updated 2026-05-17: settlement-validation gap now only triggers
+        # OBSERVE_ONLY when the daily-high forecast signal is ALSO weak
+        # (best_provider_mae_f > 5.0). Adding a weak settlement-error
+        # summary so this test still exercises the demotion path.
         update = recommend_qualification_update(
             current_state=current_state,
             shadow_report={"shadow_fill_count": 25, "taker_allowed_count": 25, "lower_80_confidence_executable_ev": 0.2},
@@ -80,9 +84,52 @@ class QualificationGovernanceTest(unittest.TestCase):
                 "unresolved_entry_count": 10,
                 "critical_mismatch_count": 0,
             },
+            settlement_error_summary={
+                "sample_count": 50,
+                "best_provider_mae_f": 6.5,  # > 5.0 threshold → weak
+            },
         )
         self.assertEqual(update.next_state, QualificationState.OBSERVE_ONLY)
-        self.assertIn("settlement_validation_incomplete", update.reasons)
+        self.assertIn("settlement_validation_incomplete_and_forecast_weak", update.reasons)
+
+    def test_good_forecast_keeps_qualified_despite_validation_gap(self) -> None:
+        """Regression test for the 2026-05-17 fix: cities with no settlement
+        corpus entries (because they were added after the corpus was built)
+        should NOT be demoted to OBSERVE_ONLY if their actual provider
+        forecast errors are good."""
+        current_state = CityQualificationState(
+            city_id="atl",
+            state=QualificationState.SHADOW_ONLY,
+            effective_from=datetime.now(timezone.utc),
+            effective_to=None,
+            settlement_validation_score=Decimal("0"),
+            calibration_score=Decimal("0.7"),
+            nowcast_score=Decimal("0.8"),
+            path_score=Decimal("0.6"),
+            market_depth_score=Decimal("0.5"),
+            slippage_score=Decimal("0.5"),
+            shadow_ev_score=Decimal("0.1"),
+            drawdown_score=Decimal("0"),
+            promotion_reasons=(),
+            demotion_reasons=(),
+        )
+        update = recommend_qualification_update(
+            current_state=current_state,
+            shadow_report={"shadow_fill_count": 5, "taker_allowed_count": 5, "lower_80_confidence_executable_ev": 0.1},
+            drift_report={
+                "average_observation_lag_minutes": 5,
+                "average_observation_excess_lag_minutes": 0,
+                "p95_observation_excess_lag_minutes": 0,
+            },
+            settled_validation_count=0,  # NO corpus entries
+            settlement_summary={"eligible_for_shadow_only": False},
+            settlement_error_summary={
+                "sample_count": 50,
+                "best_provider_mae_f": 2.5,  # under 5.0 → forecast is good
+            },
+        )
+        # Must NOT demote to OBSERVE_ONLY just because validation count is 0
+        self.assertEqual(update.next_state, QualificationState.SHADOW_ONLY)
 
     def test_risk_decision_blocks_observe_only_city(self) -> None:
         risk = build_risk_decision(

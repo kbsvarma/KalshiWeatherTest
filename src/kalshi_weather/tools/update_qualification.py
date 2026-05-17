@@ -15,6 +15,31 @@ from kalshi_weather.storage import DerivedAnalyticsStore, FileReferenceRegistry,
 from kalshi_weather.utils.serde import to_jsonable
 
 
+def _compute_settlement_error_summary(store, city_id: str) -> dict[str, object]:
+    """Return per-city daily-high forecast performance from provider_errors.
+
+    Used by the qualification engine to verify nowcast failures aren't
+    over-gating cities whose daily-high forecasts are actually accurate.
+    """
+    with store._connect() as conn:
+        rows = conn.execute(
+            "SELECT provider_id, AVG(abs_error_f), COUNT(*) FROM provider_errors "
+            "WHERE city_id = ? GROUP BY provider_id",
+            (city_id,),
+        ).fetchall()
+    if not rows:
+        return {"sample_count": 0, "best_provider_mae_f": None}
+    best_mae = min(float(mae) for _, mae, _ in rows if mae is not None)
+    total_n = sum(int(n) for _, _, n in rows)
+    return {
+        "sample_count": total_n,
+        "best_provider_mae_f": best_mae,
+        "per_provider_mae_f": {
+            pid: float(mae) for pid, mae, _ in rows if mae is not None
+        },
+    }
+
+
 def main() -> None:
     store = SQLiteStateStore("data/state/runtime.sqlite3")
     derived_store = DerivedAnalyticsStore("data/derived")
@@ -48,6 +73,11 @@ def main() -> None:
             context.city_profile,
             station_timezone=context.station.timezone,
         )
+        # T2.3-derived per-city settlement-error summary. Gives the
+        # qualification engine real evidence about whether our daily-high
+        # forecasts have been accurate, vs the older nowcast-only check.
+        settlement_error_summary = _compute_settlement_error_summary(store, city_id)
+
         update = recommend_qualification_update(
             current_state=current_state,
             shadow_report=shadow_report,
@@ -60,6 +90,7 @@ def main() -> None:
             settlement_summary=settlement_summary,
             nowcast_report=nowcast_report,
             calibration_report=calibration_report,
+            settlement_error_summary=settlement_error_summary,
         )
         next_state = apply_qualification_update(current_state, update)
         store.save_qualification_state(next_state)
