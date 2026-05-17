@@ -217,6 +217,8 @@ class SQLiteStateStore:
             # Schema migration: add signal-timing/context columns to
             # market_recommendations. Safe to run multiple times; ALTER TABLE
             # ADD COLUMN is idempotent if we check for column existence.
+            # (Kept for backward compat; the schema_migrations framework
+            # below will skip if these columns already exist on next boot.)
             existing_cols = {
                 row[1]
                 for row in conn.execute("PRAGMA table_info(market_recommendations)")
@@ -252,34 +254,13 @@ class SQLiteStateStore:
                 "ON market_recommendations(minutes_to_settlement_close)"
             )
 
-            # 2026-05-17 migration: shadow_positions primary key was originally
-            # `city_id` alone, which caused multi-bracket bets in the same
-            # city to OVERWRITE earlier brackets — making the "max 3 markets
-            # per city per day" cap effectively a no-op. The CREATE TABLE
-            # above already has the new (city_id, market_ticker) compound key
-            # for fresh DBs, but existing DBs need a migration.
-            pk_info = conn.execute(
-                "SELECT name FROM pragma_table_info('shadow_positions') WHERE pk > 0"
-            ).fetchall()
-            pk_cols = {row[0] for row in pk_info}
-            if pk_cols == {"city_id"}:
-                # Old schema detected — migrate.
-                conn.executescript(
-                    """
-                    CREATE TABLE shadow_positions_new (
-                        city_id TEXT NOT NULL,
-                        market_ticker TEXT NOT NULL,
-                        lifecycle_status TEXT NOT NULL,
-                        payload_json TEXT NOT NULL,
-                        PRIMARY KEY (city_id, market_ticker)
-                    );
-                    INSERT OR IGNORE INTO shadow_positions_new
-                        SELECT city_id, market_ticker, lifecycle_status, payload_json
-                        FROM shadow_positions;
-                    DROP TABLE shadow_positions;
-                    ALTER TABLE shadow_positions_new RENAME TO shadow_positions;
-                    """
-                )
+            # Versioned migration framework — replaces inline schema fixes.
+            # Each migration in MIGRATIONS runs at most once per DB and
+            # records its id in schema_migrations. Safe to call every startup.
+            from kalshi_weather.storage.migrations import MIGRATIONS, run_pending
+            applied = run_pending(conn, MIGRATIONS)
+            if applied:
+                print(f"[schema] applied migrations: {applied}")
 
     def save_observations(self, records: list[ObservationSnapshot]) -> None:
         with self._connect() as conn:
