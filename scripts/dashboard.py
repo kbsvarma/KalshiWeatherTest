@@ -778,16 +778,29 @@ cycles_today = load_cycle_counts_today()
 metrics = load_today_metrics()
 positions_df = load_open_positions()
 
-# Compute aggregate unrealized P&L
+# Compute aggregate unrealized P&L. Need to handle NaN explicitly —
+# pandas stores None values as NaN in the DataFrame and `is not None`
+# misses them. NaN + anything = NaN, which poisoned the sum and caused
+# "$+nan" display when any market had an empty orderbook.
+import math
 unrealized = 0.0
+priced_count = 0
+unpriced_count = 0
 if not positions_df.empty:
     for _, row in positions_df.iterrows():
         v = row.get("P&L")
-        if v is not None:
-            try:
-                unrealized += float(v)
-            except Exception:
-                pass
+        if v is None:
+            unpriced_count += 1
+            continue
+        try:
+            f = float(v)
+            if math.isnan(f) or math.isinf(f):
+                unpriced_count += 1
+                continue
+            unrealized += f
+            priced_count += 1
+        except Exception:
+            unpriced_count += 1
 
 # ── Header card ──
 health_class = "healthy" if health["healthy"] else ("down" if health["summary"] == "DOWN" else "unknown")
@@ -849,7 +862,14 @@ cards_html = (
     + _metric_html("BOT HEARTBEAT", hb_value, hb_sub)
     + _metric_html("OPEN POSITIONS", str(metrics["open_count"]),
                    f"${metrics['deployed_usd']:.2f} deployed")
-    + _metric_html("NET P&L TODAY", pnl_str, "unrealized", value_color=pnl_color)
+    + _metric_html(
+        "NET P&L TODAY",
+        pnl_str,
+        f"unrealized ({priced_count}/{priced_count+unpriced_count} priced)"
+        if unpriced_count > 0
+        else "unrealized",
+        value_color=pnl_color,
+    )
     + _metric_html("W / L", f"{metrics['wins']}W / {metrics['losses']}L",
                    "since 2026-05-17")
     + "</div>"
