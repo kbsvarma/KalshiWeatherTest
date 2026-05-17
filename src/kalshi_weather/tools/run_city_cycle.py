@@ -12,6 +12,9 @@ import json
 from zoneinfo import ZoneInfo
 
 from kalshi_weather.clients import KalshiPublicClient, NwsWeatherClient, OpenMeteoClient
+from kalshi_weather.clients.nws_afd import NwsAfdClient
+from kalshi_weather.clients.spc import fetch_spc_outlook_for_cities
+from kalshi_weather.engines.afd_extractor import extract_afd_signals_cached
 
 
 # ── Per-cycle hard limits ──────────────────────────────────────────────
@@ -236,6 +239,19 @@ def main() -> None:
         }, indent=2))
         sys.exit(2)
 
+    # SPC convective outlook — fetched ONCE per cycle (single API call,
+    # then point-in-polygon for each city). Best-effort; on failure all
+    # cities get fetched_ok=False and rank=0.
+    spc_cities = {
+        st.station_id: (float(st.latitude), float(st.longitude))
+        for st in seed.stations
+    }
+    try:
+        spc_by_station = fetch_spc_outlook_for_cities(spc_cities)
+    except Exception as exc:  # observational guard
+        print(f"[SPC] WARN: fetch failed: {exc}")
+        spc_by_station = {}
+
     city_reports = []
     city_failures: list[dict] = []
     total_decisions = 0
@@ -277,6 +293,7 @@ def main() -> None:
                 baseline_open_positions=baseline_open_positions,
                 baseline_open_position_signals=baseline_open_position_signals,
                 active_kill_switch=active_kill_switch,
+                spc_for_station=spc_by_station.get(station.station_id),
             )
             if report is None:
                 continue
@@ -341,6 +358,7 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
     baseline_open_positions,
     baseline_open_position_signals,
     active_kill_switch: bool,
+    spc_for_station=None,
 ) -> dict | None:
     """Run the decision cycle for one city. Returns a city_report dict or None.
 
@@ -350,6 +368,49 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
     qualification = state_store.get_qualification_state(city_profile.city_id)
     if qualification is None:
         return None
+
+    # ── External signals (observability only — NOT yet feeding decisions) ──
+    # AFD: pulled per WFO, extracted by local LLM (Ollama), cached by
+    # AFD product id so we only pay 4 LLM calls per WFO per day.
+    afd_signals_log = None
+    try:
+        afd_product = NwsAfdClient.fetch_latest(station.wfo_office)
+        if afd_product and afd_product.raw_text:
+            extraction = extract_afd_signals_cached(
+                wfo=station.wfo_office,
+                product_id=afd_product.product_id,
+                afd_text=afd_product.raw_text,
+            )
+            afd_signals_log = {
+                "wfo": station.wfo_office,
+                "confidence": extraction.confidence,
+                "model_spread_flag": extraction.model_spread_flag,
+                "regime": extraction.regime,
+                "high_f": extraction.mentioned_today_high_f,
+                "failed": extraction.extraction_failed,
+            }
+            print(f"[AFD] {city_profile.city_id}: {afd_signals_log}")
+    except Exception as exc:  # never fatal
+        print(f"[AFD] {city_profile.city_id}: lookup failed: {exc}")
+
+    # SPC outlook for this city (precomputed once per cycle, passed in)
+    if spc_for_station is not None:
+        print(f"[SPC] {city_profile.city_id}: category={spc_for_station.category} "
+              f"rank={spc_for_station.rank} ok={spc_for_station.fetched_ok}")
+
+    # Soil moisture (single Open-Meteo call, near-surface)
+    try:
+        soil = open_meteo_client.fetch_soil_moisture(
+            latitude=float(station.latitude),
+            longitude=float(station.longitude),
+        )
+        if soil:
+            print(f"[SOIL] {city_profile.city_id}: "
+                  f"{soil['variable']} now={soil['current_value']:.3f} "
+                  f"24h_mean={soil['mean_24h']:.3f}")
+    except Exception as exc:
+        print(f"[SOIL] {city_profile.city_id}: lookup failed: {exc}")
+    # ───────────────────────────────────────────────────────────────────────
 
     # T1.3 persistence baseline — looked up PER MARKET because settlement
     # date varies (today's market vs tomorrow's scouting market need

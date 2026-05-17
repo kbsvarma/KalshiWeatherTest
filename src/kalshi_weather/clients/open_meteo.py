@@ -82,6 +82,56 @@ class OpenMeteoClient:
         "precipitation_probability",
     )
 
+    def fetch_soil_moisture(
+        self, *, latitude: float, longitude: float
+    ) -> dict | None:
+        """Return today's near-surface soil moisture context for a station.
+
+        Uses the single-model (default-blended) forecast endpoint to fetch
+        the 0-7cm and 7-28cm soil moisture (m³/m³) and surface temperature.
+        Returns a small dict with current_value and 24h-mean, or None on
+        any failure — caller must gracefully degrade. Free API, no auth.
+
+        Soil moisture is a physics-based predictor of daytime high: dry
+        soil → less latent cooling → hotter highs in summer.
+        """
+        import statistics
+        from .http import http_get_json
+        params = {
+            "latitude": str(latitude),
+            "longitude": str(longitude),
+            "hourly": "soil_moisture_0_to_1cm,soil_moisture_1_to_3cm,soil_moisture_3_to_9cm",
+            "forecast_days": "1",
+            "timezone": "UTC",
+        }
+        try:
+            payload = http_get_json("https://api.open-meteo.com/v1/forecast", params=params)
+        except Exception:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        hourly = payload.get("hourly") or {}
+        # Pick the shallowest layer that actually returned values
+        for var_name in (
+            "soil_moisture_0_to_1cm",
+            "soil_moisture_1_to_3cm",
+            "soil_moisture_3_to_9cm",
+        ):
+            values = hourly.get(var_name)
+            if isinstance(values, list) and values:
+                # Filter Nones
+                clean = [v for v in values if isinstance(v, (int, float))]
+                if not clean:
+                    continue
+                return {
+                    "variable": var_name,
+                    "current_value": float(clean[0]),
+                    "mean_24h": float(statistics.mean(clean)),
+                    "min_24h": float(min(clean)),
+                    "max_24h": float(max(clean)),
+                }
+        return None
+
     def __init__(self, *, models: tuple[str, ...] | None = None, forecast_days: int = 3) -> None:
         # Use API model identifiers (e.g. "gfs_global"), not our internal provider ids.
         self.models = tuple(models) if models else tuple(api_id for api_id, _, _ in OPEN_METEO_MODELS)
