@@ -64,14 +64,27 @@ def apply_shadow_decision(
     edge: EdgeEstimate,
 ) -> ShadowApplicationResult:
     position = store.get_shadow_position(city_id)
-    # Pull ALL open positions in this city (not just the single one returned
-    # by get_shadow_position) so we can enforce a "max N distinct markets per
-    # city per day" cap. Pre-2026-05-17 behaviour was effectively "max 1".
+    # 2026-05-17 fix: the per-city cap should be (city, SETTLEMENT_DATE) —
+    # not pooled across all dates. NOLA's MAY 17 positions were blocking
+    # NOLA-MAY18 candidates even though they settle on different weather
+    # days with mostly independent outcomes.
+    import re as _re
+    _date_re = _re.compile(r"-(\d{2}[A-Z]{3}\d{2})-")
+    def _settle_date(ticker: str) -> str:
+        m = _date_re.search(ticker)
+        return m.group(1) if m else ""
+    candidate_settle_date = _settle_date(explanation.market_ticker)
     all_open_in_city = [
         p for p in store.list_shadow_positions()
         if p.city_id == city_id and p.lifecycle_status == "OPEN"
     ]
-    distinct_open_markets = {p.market_ticker for p in all_open_in_city}
+    # Distinct open markets for the SAME settlement date as the candidate.
+    # Total city positions (any date) are tracked separately for logging.
+    same_day_open = [
+        p for p in all_open_in_city
+        if _settle_date(p.market_ticker) == candidate_settle_date
+    ]
+    distinct_open_markets = {p.market_ticker for p in same_day_open}
 
     if explanation.final_decision != DecisionType.TAKER_ALLOWED:
         return ShadowApplicationResult(fill=None, position=position)
