@@ -292,6 +292,14 @@ def build_forecast_distribution(
             / 3600.0
         ),
     )
+    # 2026-05-17: select max vs min based on settlement_variable so LOW
+    # markets use the day's minimum rather than maximum. The rule parser
+    # already sets settlement_variable correctly; this was the only spot
+    # downstream that ignored it.
+    is_low_market = (
+        getattr(settlement_rule, "settlement_variable", None)
+        == "daily_low_temperature_f"
+    )
     for snapshot in snapshots:
         window_values = [
             temp
@@ -300,7 +308,7 @@ def build_forecast_distribution(
         ]
         if not window_values:
             window_values = list(snapshot.hourly_temp_path_f)
-        provider_max = max(window_values)
+        provider_max = min(window_values) if is_low_market else max(window_values)
         provider_max += _provider_bias_adjustment(
             snapshot,
             city_profile,

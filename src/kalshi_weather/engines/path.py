@@ -67,6 +67,88 @@ def _conditional_tail_stats(
     )
 
 
+def _passthrough_for_low_market(
+    *,
+    distribution: ForecastDistribution,
+    current_state: CurrentStateEstimate,
+    settlement_rule: SettlementRule,
+    city_profile: CityProfile,
+    as_of_time: datetime,
+    local_as_of_time: datetime,
+    threshold: Decimal,
+) -> PathEngineResult:
+    """LOW-market handler: skip path conditioning, apply climatology
+    shrinkage, return p_yes from the raw distribution.
+
+    The full path engine assumes a heating window with rising temperature
+    toward an afternoon max — that math is wrong for LOW markets which
+    settle on the overnight minimum. Until we build symmetric cooling-path
+    logic, LOW markets use forecast + climatology only.
+    """
+    threshold_high = settlement_rule.threshold_high_f
+    is_range = settlement_rule.operator == "between" and threshold_high is not None
+    p_yes = Decimal("0")
+    for temp, probability in zip(
+        distribution.support_temps_f, distribution.pmf, strict=False
+    ):
+        if is_range:
+            if threshold <= Decimal(temp) <= threshold_high:
+                p_yes += probability
+        elif settlement_rule.operator in {">", ">="}:
+            if temp > threshold or (temp == threshold and settlement_rule.inclusive_flag):
+                p_yes += probability
+        else:
+            if temp < threshold or (temp == threshold and settlement_rule.inclusive_flag):
+                p_yes += probability
+
+    # T1.2 climatology shrinkage (correctly looks up tmin_f_by_month here)
+    p_pre_shrinkage = p_yes
+    p_climatology = compute_p_climatology(
+        city_id=city_profile.city_id,
+        settlement_month=settlement_rule.local_standard_window_start.month,
+        operator=settlement_rule.operator,
+        threshold_f=threshold,
+        threshold_high_f=threshold_high,
+        inclusive_flag=settlement_rule.inclusive_flag,
+        settlement_variable=getattr(
+            settlement_rule, "settlement_variable", "daily_low_temperature_f"
+        ),
+    )
+    p_yes, shrinkage_weight = apply_shrinkage(
+        p_model=p_yes, p_climatology=p_climatology
+    )
+
+    path_state = PathProgressState(
+        as_of_time=as_of_time,
+        current_high_so_far_f=Decimal("0"),
+        current_temp_f=current_state.current_temp_est_f,
+        threshold_gap_f=Decimal("0"),
+        remaining_effective_window_minutes=0,
+        estimated_intraday_slope_f_per_hr=Decimal("0"),
+        solar_insolation_vector={
+            "daylight_weight": Decimal("0"),
+            "minutes_to_peak": Decimal("0"),
+        },
+        thermal_ceiling_estimate_f=Decimal("0"),
+        residual_gain_mean_f=Decimal("0"),
+        residual_gain_p80_f=Decimal("0"),
+        reachability_score=Decimal("1"),
+        late_day_decay_factor=Decimal("1"),
+        path_uncertainty_addon=Decimal("0.05"),  # mild extra unc for LOW until proper logic
+        threshold_already_crossed_flag=False,
+        persistence_gap_f=None,
+        persistence_uncertainty_addon=Decimal("0"),
+        p_climatology=p_climatology,
+        p_pre_shrinkage=p_pre_shrinkage,
+        shrinkage_weight=shrinkage_weight,
+    )
+    return PathEngineResult(
+        path_state=path_state,
+        conditioned_distribution=distribution,
+        p_yes=p_yes,
+    )
+
+
 def apply_path_adjustment(
     distribution: ForecastDistribution,
     current_state: CurrentStateEstimate,
@@ -78,6 +160,25 @@ def apply_path_adjustment(
     local_tz = settlement_rule.local_standard_window_start.tzinfo or ZoneInfo("UTC")
     local_as_of_time = as_of_time.astimezone(local_tz)
     threshold = settlement_rule.threshold_f or Decimal("0")
+
+    # 2026-05-17: LOW markets — settlement is overnight, the path engine's
+    # daytime-warming heuristics don't apply. Use raw forecast distribution
+    # (already correctly built from min-of-hourly in forecast.py) plus
+    # climatology shrinkage. Persistence + path conditioning skipped.
+    is_low_market = (
+        getattr(settlement_rule, "settlement_variable", None)
+        == "daily_low_temperature_f"
+    )
+    if is_low_market:
+        return _passthrough_for_low_market(
+            distribution=distribution,
+            current_state=current_state,
+            settlement_rule=settlement_rule,
+            city_profile=city_profile,
+            as_of_time=as_of_time,
+            local_as_of_time=local_as_of_time,
+            threshold=threshold,
+        )
     settlement_window_started = local_as_of_time >= settlement_rule.local_standard_window_start
     settlement_window_open = (
         settlement_rule.local_standard_window_start
