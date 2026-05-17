@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/kalshi-weather/strategy_decision_explanation_v1.0.0.json",
+  "title": "StrategyDecisionExplanation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "decision_id",
+    "run_mode",
+    "as_of_time",
+    "market_ticker",
+    "city_id",
+    "station_id",
+    "settlement_rule_id",
+    "data_freshness",
+    "current_state",
+    "forecast_summary",
+    "path_state",
+    "microstructure_summary",
+    "edge_summary",
+    "regime_summary",
+    "risk_summary",
+    "final_decision",
+    "explanation_codes",
+    "provenance_refs",
+    "module_versions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "decision_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_mode": {
+      "type": "string",
+      "enum": ["REPLAY", "SHADOW", "LIVE_READONLY", "LIVE_TRADE"]
+    },
+    "as_of_time": {
+      "type": "string"
+    },
+    "market_ticker": {
+      "type": "string",
+      "minLength": 1
+    },
+    "city_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "station_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "settlement_rule_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "data_freshness": {
+      "type": "object"
+    },
+    "current_state": {
+      "type": "object"
+    },
+    "forecast_summary": {
+      "type": "object"
+    },
+    "path_state": {
+      "type": "object"
+    },
+    "microstructure_summary": {
+      "type": "object"
+    },
+    "edge_summary": {
+      "type": "object"
+    },
+    "regime_summary": {
+      "type": "object"
+    },
+    "risk_summary": {
+      "type": "object"
+    },
+    "final_decision": {
+      "type": "string"
+    },
+    "explanation_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "provenance_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "module_versions": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  }
+}

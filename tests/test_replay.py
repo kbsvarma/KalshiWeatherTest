@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from decimal import Decimal
+import unittest
+
+from kalshi_weather.domain.enums import DecisionType, RunMode
+from kalshi_weather.domain.models import EdgeEstimate, StrategyDecisionExplanation
+from kalshi_weather.engines.decision import DecisionCycleResult
+from kalshi_weather.replay import summarize_replay_scenarios
+
+
+class ReplayScenarioTest(unittest.TestCase):
+    def test_summarize_replay_scenarios(self) -> None:
+        explanation = StrategyDecisionExplanation(
+            schema_version="1.0.0",
+            decision_id="d1",
+            run_mode=RunMode.REPLAY,
+            as_of_time=datetime.now(timezone.utc),
+            market_ticker="M1",
+            city_id="nyc",
+            station_id="s1",
+            settlement_rule_id="r1",
+            data_freshness={},
+            current_state={},
+            forecast_summary={},
+            path_state={},
+            microstructure_summary={},
+            edge_summary={},
+            regime_summary={},
+            risk_summary={},
+            final_decision=DecisionType.TAKER_ALLOWED,
+            explanation_codes=(),
+            provenance_refs=(),
+            module_versions={},
+        )
+        edge = EdgeEstimate(
+            market_ticker="M1",
+            side="yes",
+            quantity_fp=Decimal("1"),
+            p_model=Decimal("0.65"),
+            p_market_exec=Decimal("0.40"),
+            raw_edge=Decimal("0.25"),
+            fee_cost=Decimal("0.01"),
+            slippage_cost=Decimal("0.02"),
+            adverse_selection_penalty=Decimal("0.01"),
+            total_friction=Decimal("0.04"),
+            friction_to_edge_ratio=Decimal("0.16"),
+            uncertainty_haircut=Decimal("0.20"),
+            regime_haircut=Decimal("0.10"),
+            portfolio_haircut=Decimal("0"),
+            edge_conf_adj=Decimal("0.18"),
+            executable_ev_per_contract=Decimal("0.14"),
+            executable_ev_total=Decimal("0.14"),
+        )
+        report = summarize_replay_scenarios([DecisionCycleResult(explanation=explanation, selected_edge=edge)])
+        self.assertEqual(report["base"]["sample_count"], 1)
+        self.assertGreater(report["optimistic"]["mean_executable_ev"], report["pessimistic"]["mean_executable_ev"])
+        self.assertGreater(report["optimistic"]["mean_fill_ratio"], report["pessimistic"]["mean_fill_ratio"])
+        self.assertIsNotNone(report["base"]["mean_filled_quantity"])
+
+
+if __name__ == "__main__":
+    unittest.main()
