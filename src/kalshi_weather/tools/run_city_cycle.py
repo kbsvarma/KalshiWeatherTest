@@ -533,6 +533,32 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
     series_payload = kalshi_client.get_series(series.series_ticker)
     fee_multiplier = (series_payload.get("series", {}) or {}).get("fee_multiplier") or 1
 
+    # ── Prefetch orderbook + trades for all markets concurrently ──
+    # Before: each market did 2 sequential HTTP calls inside the decision
+    # loop = ~600ms × 20 markets/city × 18 cities = 216s/cycle just on
+    # this layer. Now: 6 worker threads fetch them in parallel; the
+    # decision loop below uses the prefetched data. Kalshi public client
+    # is stateless so concurrent calls are safe.
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _prefetch_market(ms) -> tuple[str, dict | None]:
+        try:
+            ob_adapter = KalshiOrderbookAdapter(kalshi_client, ms.market_ticker)
+            ob_raw = ob_adapter.fetch_raw()
+            tr_adapter = KalshiTradeAdapter(kalshi_client, ms.market_ticker, limit=200)
+            tr_raw = tr_adapter.fetch_raw()
+            return ms.market_ticker, {
+                "ob_raw": ob_raw, "ob_adapter": ob_adapter,
+                "tr_raw": tr_raw, "tr_adapter": tr_adapter,
+            }
+        except Exception as exc:
+            return ms.market_ticker, {"error": str(exc)}
+
+    prefetched: dict[str, dict] = {}
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        for ticker, data in pool.map(_prefetch_market, market_snapshots):
+            prefetched[ticker] = data
+
     decision_results: list[dict] = []
     for market_snapshot, payload in zip(market_snapshots, market_payloads, strict=False):
         try:
@@ -546,15 +572,18 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
             scouting_future_market = market_date is not None and market_date > local_today
             decision_open_positions = [] if scouting_future_market else baseline_open_positions
             decision_open_position_signals = [] if scouting_future_market else baseline_open_position_signals
-            orderbook_adapter = KalshiOrderbookAdapter(kalshi_client, market_snapshot.market_ticker)
-            orderbook_raw = orderbook_adapter.fetch_raw()
+            # Use prefetched orderbook + trades
+            md = prefetched.get(market_snapshot.market_ticker, {})
+            if "error" in md or "ob_raw" not in md:
+                print(f"[WARN] prefetch missing for {market_snapshot.market_ticker}")
+                continue
+            orderbook_raw = md["ob_raw"]
             raw_store.write(orderbook_raw)
-            orderbook = orderbook_adapter.normalize(orderbook_raw)[0].record
+            orderbook = md["ob_adapter"].normalize(orderbook_raw)[0].record
             state_store.save_orderbook_snapshot(orderbook)
-            trade_adapter = KalshiTradeAdapter(kalshi_client, market_snapshot.market_ticker, limit=200)
-            trade_raw = trade_adapter.fetch_raw()
+            trade_raw = md["tr_raw"]
             raw_store.write(trade_raw)
-            trades = [env.record for env in trade_adapter.normalize(trade_raw)]
+            trades = [env.record for env in md["tr_adapter"].normalize(trade_raw)]
             state_store.save_trade_snapshots(trades)
             recent_orderbooks = state_store.get_recent_orderbook_snapshots(
                 market_snapshot.market_ticker,
