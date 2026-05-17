@@ -25,7 +25,8 @@ health=0
 report() { (( QUIET )) || echo "$@"; }
 
 # 1. launchd jobs loaded?
-cycle_line=$(launchctl list 2>/dev/null | grep com.varmakammili.kalshi.weather.cycle || true)
+# Use grep -E with anchored end-of-line so cycle doesn't match cycle.backup too.
+cycle_line=$(launchctl list 2>/dev/null | grep -E 'com\.varmakammili\.kalshi\.weather\.cycle$' || true)
 settle_line=$(launchctl list 2>/dev/null | grep com.varmakammili.kalshi.weather.settlements || true)
 
 if [[ -z "$cycle_line" ]]; then
