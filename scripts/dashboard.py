@@ -556,6 +556,15 @@ st.markdown(
     .kxw-pill.down { background: #fef2f2; color: #b91c1c; }
     .kxw-pill.unknown { background: #f3f4f6; color: #4b5563; }
     .kxw-pill .dot { font-size: 10px; }
+    /* Health badge — clickable variant of .kxw-pill. Used as a link
+       <a href='?diag=1'> so clicking runs the health check via Streamlit's
+       query-param-driven rerun. */
+    a.kxw-pill {
+        text-decoration: none;
+        cursor: pointer;
+        transition: filter 0.15s;
+    }
+    a.kxw-pill:hover { filter: brightness(0.94); }
     /* Header card icon */
     .kxw-icon {
         width: 44px; height: 44px;
@@ -793,13 +802,17 @@ st.markdown(
             <div style='font-size:18px;font-weight:600;color:#111827;line-height:1.2;'>
                 Kalshi Weather Bot
                 <span class='kxw-pill live'>LIVE</span>
-                <span class='kxw-pill {health_class}'>
+                <a href='?diag=1' class='kxw-pill {health_class}'
+                   target='_self'
+                   onclick='window.location.href = window.location.pathname + "?diag=1"; return false;'
+                   title='Click to run health check'>
                     <span class='dot' style='color:{health_dot_color};'>●</span>
                     {health["summary"]}
-                </span>
+                </a>
             </div>
             <div style='color:#6b7280;font-size:12px;margin-top:6px;'>
                 18 cities · HIGH + LOW · Mac launchd · last cycle {cycles_today["last_end_et"]}
+                &nbsp;·&nbsp; <span style='color:#9ca3af;font-size:11px;'>click the status badge to re-check</span>
             </div>
         </div>
     </div>
@@ -842,17 +855,12 @@ cards_html = (
 )
 st.markdown(cards_html, unsafe_allow_html=True)
 
-# ── Diagnostic button (centered, status banner below) ──
-st.markdown("<div style='margin-top:16px;'></div>", unsafe_allow_html=True)
-btn_l, btn_c, btn_r = st.columns([1, 1, 1])
-with btn_c:
-    diag_clicked = st.button(
-        "🔍 Check Bot Status",
-        type="primary",
-        use_container_width=True,
-        help="Runs healthcheck.sh and shows current state.",
-    )
-if diag_clicked:
+# ── Diagnostic panel (driven by ?diag=1 URL param — set by clicking the
+#     health badge in the header card. No dedicated centered button.) ──
+qp = st.query_params
+diag_active = qp.get("diag") == "1"
+if diag_active:
+    # Force-refresh cached health status so the click triggers a fresh check
     st.cache_data.clear()
     health = load_health_status()
     if health["healthy"]:
@@ -862,17 +870,27 @@ if diag_clicked:
     elif health["summary"] == "DOWN":
         banner_bg, banner_border, banner_color = "#fef2f2", "#fecaca", "#991b1b"
         banner_title = "● BOT DOWN"
-        banner_body = f"<pre style='margin:8px 0 0 0;font-size:11px;color:#7f1d1d;white-space:pre-wrap;'>{health['raw']}</pre>"
+        banner_body = (
+            f"<pre style='margin:8px 0 0 0;font-size:11px;color:#7f1d1d;"
+            f"white-space:pre-wrap;'>{health['raw']}</pre>"
+        )
     else:
         banner_bg, banner_border, banner_color = "#fffbeb", "#fde68a", "#92400e"
         banner_title = "● STATUS UNCLEAR"
-        banner_body = f"<pre style='margin:8px 0 0 0;font-size:11px;'>{health['raw']}</pre>"
+        banner_body = (
+            f"<pre style='margin:8px 0 0 0;font-size:11px;'>{health['raw']}</pre>"
+        )
     st.markdown(
         f"<div style='background:{banner_bg};border:1px solid {banner_border};"
-        f"border-radius:8px;padding:12px 20px;color:{banner_color};"
-        f"font-size:13px;margin:14px auto 0 auto;max-width:600px;"
-        f"text-align:center;'>"
-        f"<strong>{banner_title}</strong> — {banner_body}</div>",
+        f"border-radius:8px;padding:14px 20px;color:{banner_color};"
+        f"font-size:13px;margin:0 0 18px 0;'>"
+        f"<div style='display:flex;justify-content:space-between;align-items:center;'>"
+        f"<strong>{banner_title}</strong>"
+        f"<a href='?' target='_self' "
+        f"onclick='window.location.href = window.location.pathname; return false;' "
+        f"style='color:{banner_color};text-decoration:none;"
+        f"font-size:11px;opacity:0.7;cursor:pointer;'>✕ close</a></div>"
+        f"<div style='margin-top:6px;'>{banner_body}</div></div>",
         unsafe_allow_html=True,
     )
 
