@@ -761,6 +761,98 @@
         "SON": 15
       },
       "wind_shift_cap_f": "4"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "sfo",
+      "cloud_shock_cap_f": "6",
+      "display_name": "San Francisco",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          15
+        ],
+        "JJA": [
+          9,
+          17
+        ],
+        "MAM": [
+          9,
+          16
+        ],
+        "SON": [
+          9,
+          15
+        ]
+      },
+      "marine_intrusion_cap_f": "8",
+      "marine_sensitive_flag": true,
+      "onshore_wind_sectors": [
+        220,
+        230,
+        240,
+        250,
+        260,
+        270,
+        280,
+        290,
+        300
+      ],
+      "region_cluster": "west_coast_metro",
+      "station_id": "sfo-airport",
+      "storm_shock_cap_f": "7",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 13,
+        "JJA": 15,
+        "MAM": 14,
+        "SON": 14
+      },
+      "wind_shift_cap_f": "5"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "sea",
+      "cloud_shock_cap_f": "6",
+      "display_name": "Seattle",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          15
+        ],
+        "JJA": [
+          9,
+          18
+        ],
+        "MAM": [
+          9,
+          17
+        ],
+        "SON": [
+          9,
+          16
+        ]
+      },
+      "marine_intrusion_cap_f": "6",
+      "marine_sensitive_flag": true,
+      "onshore_wind_sectors": [
+        180,
+        190,
+        200,
+        210,
+        220,
+        230,
+        240
+      ],
+      "region_cluster": "west_coast_metro",
+      "station_id": "sea-airport",
+      "storm_shock_cap_f": "7",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 14,
+        "JJA": 16,
+        "MAM": 15,
+        "SON": 15
+      },
+      "wind_shift_cap_f": "5"
     }
   ],
   "created_at": "2026-04-06T02:57:44.129653+00:00",
@@ -1232,6 +1324,58 @@
         "kxlow_activation_2026_05_17"
       ],
       "title": "Lowest Temperature SATX"
+    },
+    {
+      "active_from": "2026-05-17T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "sfo",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHTSFO",
+      "source_provenance": [
+        "kalshi_public_series",
+        "expansion_sfo_sea_2026_05_17"
+      ],
+      "title": "San Francisco High Temperature Daily"
+    },
+    {
+      "active_from": "2026-05-17T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "sfo",
+      "frequency": "daily",
+      "series_ticker": "KXLOWTSFO",
+      "source_provenance": [
+        "kalshi_public_series",
+        "expansion_sfo_sea_2026_05_17"
+      ],
+      "title": "Lowest Temperature San Francisco"
+    },
+    {
+      "active_from": "2026-05-17T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "sea",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHTSEA",
+      "source_provenance": [
+        "kalshi_public_series",
+        "expansion_sfo_sea_2026_05_17"
+      ],
+      "title": "Seattle Maximum Temperature Daily"
+    },
+    {
+      "active_from": "2026-05-17T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "sea",
+      "frequency": "daily",
+      "series_ticker": "KXLOWTSEA",
+      "source_provenance": [
+        "kalshi_public_series",
+        "expansion_sfo_sea_2026_05_17"
+      ],
+      "title": "Low Temperature Seattle"
     }
   ],
   "stations": [
@@ -1576,6 +1720,44 @@
       "station_name": "San Antonio International",
       "timezone": "America/Chicago",
       "wfo_office": "EWX"
+    },
+    {
+      "climate_product_id": "CLISFO",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 85,
+      "grid_y": 98,
+      "latitude": "37.6213",
+      "longitude": "-122.3790",
+      "metar_code": "KSFO",
+      "ncei_station_id": "USW00023234",
+      "nws_station_api_id": "KSFO",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHTSFO",
+        "https://forecast.weather.gov/product.php?site=MTR&issuedby=SFO&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "sfo-airport",
+      "station_name": "San Francisco International Airport",
+      "timezone": "America/Los_Angeles",
+      "wfo_office": "MTR"
+    },
+    {
+      "climate_product_id": "CLISEA",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 124,
+      "grid_y": 61,
+      "latitude": "47.4502",
+      "longitude": "-122.3088",
+      "metar_code": "KSEA",
+      "ncei_station_id": "USW00024233",
+      "nws_station_api_id": "KSEA",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHTSEA",
+        "https://forecast.weather.gov/product.php?site=SEW&issuedby=SEA&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "sea-airport",
+      "station_name": "Seattle-Tacoma International Airport",
+      "timezone": "America/Los_Angeles",
+      "wfo_office": "SEW"
     }
   ],
   "version": "seed_v5_18cities_high_only"
