@@ -1,0 +1,1582 @@
+{
+  "city_profiles": [
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "nyc",
+      "cloud_shock_cap_f": "5",
+      "display_name": "New York City",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          15
+        ],
+        "JJA": [
+          9,
+          18
+        ],
+        "MAM": [
+          9,
+          17
+        ],
+        "SON": [
+          9,
+          16
+        ]
+      },
+      "marine_intrusion_cap_f": "6",
+      "marine_sensitive_flag": true,
+      "onshore_wind_sectors": [
+        80,
+        90,
+        100,
+        110,
+        120,
+        130,
+        140,
+        150
+      ],
+      "region_cluster": "northeast_metro",
+      "station_id": "nyc-central-park",
+      "storm_shock_cap_f": "7",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 14,
+        "JJA": 16,
+        "MAM": 15,
+        "SON": 15
+      },
+      "wind_shift_cap_f": "4"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "phl",
+      "cloud_shock_cap_f": "5",
+      "display_name": "Philadelphia",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          15
+        ],
+        "JJA": [
+          9,
+          18
+        ],
+        "MAM": [
+          9,
+          17
+        ],
+        "SON": [
+          9,
+          16
+        ]
+      },
+      "marine_intrusion_cap_f": "4",
+      "marine_sensitive_flag": true,
+      "onshore_wind_sectors": [
+        90,
+        100,
+        110,
+        120,
+        130,
+        140,
+        150
+      ],
+      "region_cluster": "northeast_corridor",
+      "station_id": "phl-airport",
+      "storm_shock_cap_f": "7",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 14,
+        "JJA": 16,
+        "MAM": 15,
+        "SON": 15
+      },
+      "wind_shift_cap_f": "4"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "aus",
+      "cloud_shock_cap_f": "6",
+      "display_name": "Austin",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          17
+        ],
+        "JJA": [
+          9,
+          19
+        ],
+        "MAM": [
+          10,
+          18
+        ],
+        "SON": [
+          10,
+          18
+        ]
+      },
+      "marine_intrusion_cap_f": "1",
+      "marine_sensitive_flag": false,
+      "onshore_wind_sectors": [],
+      "region_cluster": "texas_inland",
+      "station_id": "aus-bergstrom",
+      "storm_shock_cap_f": "8",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 15,
+        "JJA": 17,
+        "MAM": 16,
+        "SON": 16
+      },
+      "wind_shift_cap_f": "5"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "den",
+      "cloud_shock_cap_f": "6",
+      "display_name": "Denver",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          16
+        ],
+        "JJA": [
+          9,
+          18
+        ],
+        "MAM": [
+          9,
+          17
+        ],
+        "SON": [
+          10,
+          17
+        ]
+      },
+      "marine_intrusion_cap_f": "1",
+      "marine_sensitive_flag": false,
+      "onshore_wind_sectors": [],
+      "region_cluster": "front_range",
+      "station_id": "den-airport",
+      "storm_shock_cap_f": "7",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 14,
+        "JJA": 16,
+        "MAM": 15,
+        "SON": 15
+      },
+      "wind_shift_cap_f": "6"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "bos",
+      "cloud_shock_cap_f": "5",
+      "display_name": "Boston",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          15
+        ],
+        "JJA": [
+          9,
+          17
+        ],
+        "MAM": [
+          9,
+          17
+        ],
+        "SON": [
+          9,
+          16
+        ]
+      },
+      "marine_intrusion_cap_f": "7",
+      "marine_sensitive_flag": true,
+      "onshore_wind_sectors": [
+        80,
+        90,
+        100,
+        110,
+        120,
+        130,
+        140,
+        150,
+        160
+      ],
+      "region_cluster": "northeast_metro",
+      "station_id": "bos-logan",
+      "storm_shock_cap_f": "6",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 13,
+        "JJA": 15,
+        "MAM": 15,
+        "SON": 14
+      },
+      "wind_shift_cap_f": "4"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "mia",
+      "cloud_shock_cap_f": "6",
+      "display_name": "Miami",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          16
+        ],
+        "JJA": [
+          9,
+          17
+        ],
+        "MAM": [
+          9,
+          17
+        ],
+        "SON": [
+          9,
+          17
+        ]
+      },
+      "marine_intrusion_cap_f": "7",
+      "marine_sensitive_flag": true,
+      "onshore_wind_sectors": [
+        50,
+        60,
+        70,
+        80,
+        90,
+        100,
+        110,
+        120,
+        130,
+        140
+      ],
+      "region_cluster": "florida_metro",
+      "station_id": "mia-airport",
+      "storm_shock_cap_f": "7",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 14,
+        "JJA": 15,
+        "MAM": 15,
+        "SON": 15
+      },
+      "wind_shift_cap_f": "5"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "chi",
+      "cloud_shock_cap_f": "5",
+      "display_name": "Chicago",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          15
+        ],
+        "JJA": [
+          9,
+          18
+        ],
+        "MAM": [
+          9,
+          17
+        ],
+        "SON": [
+          9,
+          16
+        ]
+      },
+      "marine_intrusion_cap_f": "4",
+      "marine_sensitive_flag": true,
+      "onshore_wind_sectors": [
+        30,
+        40,
+        50,
+        60,
+        70,
+        80,
+        90,
+        100,
+        110
+      ],
+      "region_cluster": "midwest_metro",
+      "station_id": "chi-midway",
+      "storm_shock_cap_f": "7",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 14,
+        "JJA": 16,
+        "MAM": 15,
+        "SON": 15
+      },
+      "wind_shift_cap_f": "4"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "lax",
+      "cloud_shock_cap_f": "6",
+      "display_name": "Los Angeles",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          15
+        ],
+        "JJA": [
+          10,
+          17
+        ],
+        "MAM": [
+          10,
+          17
+        ],
+        "SON": [
+          10,
+          16
+        ]
+      },
+      "marine_intrusion_cap_f": "7",
+      "marine_sensitive_flag": true,
+      "onshore_wind_sectors": [
+        200,
+        210,
+        220,
+        230,
+        240,
+        250,
+        260,
+        270,
+        280
+      ],
+      "region_cluster": "west_coast_metro",
+      "station_id": "lax-airport",
+      "storm_shock_cap_f": "5",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 14,
+        "JJA": 14,
+        "MAM": 14,
+        "SON": 14
+      },
+      "wind_shift_cap_f": "5"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "atl",
+      "cloud_shock_cap_f": "5",
+      "display_name": "Atlanta",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          16
+        ],
+        "JJA": [
+          9,
+          19
+        ],
+        "MAM": [
+          9,
+          18
+        ],
+        "SON": [
+          9,
+          17
+        ]
+      },
+      "marine_intrusion_cap_f": "0",
+      "marine_sensitive_flag": false,
+      "onshore_wind_sectors": [],
+      "region_cluster": "southeast_inland",
+      "station_id": "atl-hartsfield",
+      "storm_shock_cap_f": "6",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 15,
+        "JJA": 16,
+        "MAM": 16,
+        "SON": 15
+      },
+      "wind_shift_cap_f": "4"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "dal",
+      "cloud_shock_cap_f": "5",
+      "display_name": "Dallas",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          16
+        ],
+        "JJA": [
+          9,
+          19
+        ],
+        "MAM": [
+          9,
+          18
+        ],
+        "SON": [
+          9,
+          17
+        ]
+      },
+      "marine_intrusion_cap_f": "3",
+      "marine_sensitive_flag": false,
+      "onshore_wind_sectors": [
+        140,
+        150,
+        160,
+        170,
+        180
+      ],
+      "region_cluster": "south_plains",
+      "station_id": "dal-dfw",
+      "storm_shock_cap_f": "7",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 15,
+        "JJA": 16,
+        "MAM": 16,
+        "SON": 15
+      },
+      "wind_shift_cap_f": "4"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "dc",
+      "cloud_shock_cap_f": "5",
+      "display_name": "Washington DC",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          15
+        ],
+        "JJA": [
+          9,
+          18
+        ],
+        "MAM": [
+          9,
+          17
+        ],
+        "SON": [
+          9,
+          16
+        ]
+      },
+      "marine_intrusion_cap_f": "4",
+      "marine_sensitive_flag": true,
+      "onshore_wind_sectors": [
+        60,
+        70,
+        80,
+        90,
+        100,
+        110
+      ],
+      "region_cluster": "mid_atlantic",
+      "station_id": "dc-reagan-national",
+      "storm_shock_cap_f": "6",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 14,
+        "JJA": 16,
+        "MAM": 15,
+        "SON": 15
+      },
+      "wind_shift_cap_f": "4"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "hou",
+      "cloud_shock_cap_f": "5",
+      "display_name": "Houston",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          16
+        ],
+        "JJA": [
+          9,
+          19
+        ],
+        "MAM": [
+          9,
+          18
+        ],
+        "SON": [
+          9,
+          17
+        ]
+      },
+      "marine_intrusion_cap_f": "5",
+      "marine_sensitive_flag": true,
+      "onshore_wind_sectors": [
+        110,
+        120,
+        130,
+        140,
+        150,
+        160,
+        170,
+        180
+      ],
+      "region_cluster": "gulf_coast",
+      "station_id": "hou-iah",
+      "storm_shock_cap_f": "7",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 14,
+        "JJA": 16,
+        "MAM": 16,
+        "SON": 15
+      },
+      "wind_shift_cap_f": "4"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "lv",
+      "cloud_shock_cap_f": "4",
+      "display_name": "Las Vegas",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          15
+        ],
+        "JJA": [
+          8,
+          19
+        ],
+        "MAM": [
+          9,
+          18
+        ],
+        "SON": [
+          9,
+          17
+        ]
+      },
+      "marine_intrusion_cap_f": "0",
+      "marine_sensitive_flag": false,
+      "onshore_wind_sectors": [],
+      "region_cluster": "southwest_desert",
+      "station_id": "lv-mccarran",
+      "storm_shock_cap_f": "5",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 14,
+        "JJA": 17,
+        "MAM": 16,
+        "SON": 15
+      },
+      "wind_shift_cap_f": "3"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "msp",
+      "cloud_shock_cap_f": "5",
+      "display_name": "Minneapolis",
+      "heating_window_by_season": {
+        "DJF": [
+          11,
+          15
+        ],
+        "JJA": [
+          9,
+          18
+        ],
+        "MAM": [
+          9,
+          17
+        ],
+        "SON": [
+          9,
+          16
+        ]
+      },
+      "marine_intrusion_cap_f": "0",
+      "marine_sensitive_flag": false,
+      "onshore_wind_sectors": [],
+      "region_cluster": "north_continental",
+      "station_id": "msp-airport",
+      "storm_shock_cap_f": "6",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 14,
+        "JJA": 16,
+        "MAM": 15,
+        "SON": 14
+      },
+      "wind_shift_cap_f": "6"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "nola",
+      "cloud_shock_cap_f": "5",
+      "display_name": "New Orleans",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          16
+        ],
+        "JJA": [
+          9,
+          18
+        ],
+        "MAM": [
+          9,
+          18
+        ],
+        "SON": [
+          9,
+          17
+        ]
+      },
+      "marine_intrusion_cap_f": "6",
+      "marine_sensitive_flag": true,
+      "onshore_wind_sectors": [
+        90,
+        100,
+        110,
+        120,
+        130,
+        140,
+        150,
+        160,
+        170
+      ],
+      "region_cluster": "gulf_coast",
+      "station_id": "nola-msy",
+      "storm_shock_cap_f": "7",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 14,
+        "JJA": 15,
+        "MAM": 15,
+        "SON": 14
+      },
+      "wind_shift_cap_f": "4"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "okc",
+      "cloud_shock_cap_f": "5",
+      "display_name": "Oklahoma City",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          16
+        ],
+        "JJA": [
+          9,
+          19
+        ],
+        "MAM": [
+          9,
+          18
+        ],
+        "SON": [
+          9,
+          17
+        ]
+      },
+      "marine_intrusion_cap_f": "0",
+      "marine_sensitive_flag": false,
+      "onshore_wind_sectors": [],
+      "region_cluster": "south_plains",
+      "station_id": "okc-will-rogers",
+      "storm_shock_cap_f": "8",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 15,
+        "JJA": 16,
+        "MAM": 16,
+        "SON": 15
+      },
+      "wind_shift_cap_f": "5"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "phx",
+      "cloud_shock_cap_f": "4",
+      "display_name": "Phoenix",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          15
+        ],
+        "JJA": [
+          8,
+          19
+        ],
+        "MAM": [
+          9,
+          18
+        ],
+        "SON": [
+          9,
+          17
+        ]
+      },
+      "marine_intrusion_cap_f": "0",
+      "marine_sensitive_flag": false,
+      "onshore_wind_sectors": [],
+      "region_cluster": "southwest_desert",
+      "station_id": "phx-sky-harbor",
+      "storm_shock_cap_f": "6",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 14,
+        "JJA": 17,
+        "MAM": 16,
+        "SON": 15
+      },
+      "wind_shift_cap_f": "3"
+    },
+    {
+      "calibration_buckets_version": "seed_v1",
+      "city_id": "sat",
+      "cloud_shock_cap_f": "5",
+      "display_name": "San Antonio",
+      "heating_window_by_season": {
+        "DJF": [
+          10,
+          16
+        ],
+        "JJA": [
+          9,
+          19
+        ],
+        "MAM": [
+          9,
+          18
+        ],
+        "SON": [
+          9,
+          17
+        ]
+      },
+      "marine_intrusion_cap_f": "3",
+      "marine_sensitive_flag": false,
+      "onshore_wind_sectors": [
+        140,
+        150,
+        160,
+        170,
+        180
+      ],
+      "region_cluster": "south_plains",
+      "station_id": "sat-airport",
+      "storm_shock_cap_f": "6",
+      "typical_peak_hour_local_by_season": {
+        "DJF": 15,
+        "JJA": 16,
+        "MAM": 16,
+        "SON": 15
+      },
+      "wind_shift_cap_f": "4"
+    }
+  ],
+  "created_at": "2026-04-06T02:57:44.129653+00:00",
+  "series_definitions": [
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "aus",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHAUS",
+      "source_provenance": [
+        "kalshi_public_series",
+        "manual_seed_consolidated_2026_05_16"
+      ],
+      "title": "Highest temperature in Austin"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "chi",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHCHI",
+      "source_provenance": [
+        "kalshi_public_series",
+        "manual_seed_consolidated_2026_05_16"
+      ],
+      "title": "Highest temperature in Chicago"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "den",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHDEN",
+      "source_provenance": [
+        "kalshi_public_series",
+        "manual_seed_consolidated_2026_05_16"
+      ],
+      "title": "Highest temperature in Denver"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "lax",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHLAX",
+      "source_provenance": [
+        "kalshi_public_series",
+        "manual_seed_consolidated_2026_05_16"
+      ],
+      "title": "Highest temperature in Los Angeles"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "mia",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHMIA",
+      "source_provenance": [
+        "kalshi_public_series",
+        "manual_seed_consolidated_2026_05_16"
+      ],
+      "title": "Highest temperature in Miami"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "nyc",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHNY",
+      "source_provenance": [
+        "kalshi_public_series",
+        "manual_seed_consolidated_2026_05_16"
+      ],
+      "title": "Highest temperature in NYC"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "phl",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHPHIL",
+      "source_provenance": [
+        "kalshi_public_series",
+        "manual_seed_consolidated_2026_05_16"
+      ],
+      "title": "Highest temperature in Philadelphia"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "atl",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHTATL",
+      "source_provenance": [
+        "kalshi_public_series",
+        "manual_seed_consolidated_2026_05_16"
+      ],
+      "title": "Atlanta Max Temperature"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "bos",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHTBOS",
+      "source_provenance": [
+        "kalshi_public_series",
+        "manual_seed_consolidated_2026_05_16"
+      ],
+      "title": "Boston Maximum Daily Temperature"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "dal",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHTDAL",
+      "source_provenance": [
+        "kalshi_public_series",
+        "manual_seed_consolidated_2026_05_16"
+      ],
+      "title": "Dallas Maximum Temperature"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "dc",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHTDC",
+      "source_provenance": [
+        "kalshi_public_series",
+        "manual_seed_consolidated_2026_05_16"
+      ],
+      "title": "Washington DC Daily Max Temp"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "hou",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHTHOU",
+      "source_provenance": [
+        "kalshi_public_series",
+        "manual_seed_consolidated_2026_05_16"
+      ],
+      "title": "Daily High Temperature Houston"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "lv",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHTLV",
+      "source_provenance": [
+        "kalshi_public_series",
+        "manual_seed_consolidated_2026_05_16"
+      ],
+      "title": "Las Vegas Max Daily Temperature"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "msp",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHTMIN",
+      "source_provenance": [
+        "kalshi_public_series",
+        "manual_seed_consolidated_2026_05_16"
+      ],
+      "title": "Minneapolis Daily High Temperature"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "nola",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHTNOLA",
+      "source_provenance": [
+        "kalshi_public_series",
+        "manual_seed_consolidated_2026_05_16"
+      ],
+      "title": "New Orleans Max temp Daily"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "okc",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHTOKC",
+      "source_provenance": [
+        "kalshi_public_series",
+        "manual_seed_consolidated_2026_05_16"
+      ],
+      "title": "Oklahoma City Maximum High Temperature"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "phx",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHTPHX",
+      "source_provenance": [
+        "kalshi_public_series",
+        "manual_seed_consolidated_2026_05_16"
+      ],
+      "title": "Phoenix High Temperature Daily"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "sat",
+      "frequency": "daily",
+      "series_ticker": "KXHIGHTSATX",
+      "source_provenance": [
+        "kalshi_public_series",
+        "manual_seed_consolidated_2026_05_16"
+      ],
+      "title": "San Antonio Daily Maximum Temperature"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "aus",
+      "frequency": "daily",
+      "series_ticker": "KXLOWAUS",
+      "source_provenance": [
+        "kalshi_public_series",
+        "kxlow_activation_2026_05_17"
+      ],
+      "title": "Lowest temperature in Austin"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "chi",
+      "frequency": "daily",
+      "series_ticker": "KXLOWCHI",
+      "source_provenance": [
+        "kalshi_public_series",
+        "kxlow_activation_2026_05_17"
+      ],
+      "title": "Lowest temperature in Chicago"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "den",
+      "frequency": "daily",
+      "series_ticker": "KXLOWDEN",
+      "source_provenance": [
+        "kalshi_public_series",
+        "kxlow_activation_2026_05_17"
+      ],
+      "title": "Lowest temperature in Denver"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "lax",
+      "frequency": "daily",
+      "series_ticker": "KXLOWLAX",
+      "source_provenance": [
+        "kalshi_public_series",
+        "kxlow_activation_2026_05_17"
+      ],
+      "title": "Lowest temperature in Los Angeles"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "mia",
+      "frequency": "daily",
+      "series_ticker": "KXLOWMIA",
+      "source_provenance": [
+        "kalshi_public_series",
+        "kxlow_activation_2026_05_17"
+      ],
+      "title": "Lowest temperature in Miami"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "nyc",
+      "frequency": "daily",
+      "series_ticker": "KXLOWNY",
+      "source_provenance": [
+        "kalshi_public_series",
+        "kxlow_activation_2026_05_17"
+      ],
+      "title": "Lowest Temperature in NYC"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "phl",
+      "frequency": "daily",
+      "series_ticker": "KXLOWPHIL",
+      "source_provenance": [
+        "kalshi_public_series",
+        "kxlow_activation_2026_05_17"
+      ],
+      "title": "Lowest temperature in Philadelphia"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "atl",
+      "frequency": "daily",
+      "series_ticker": "KXLOWTATL",
+      "source_provenance": [
+        "kalshi_public_series",
+        "kxlow_activation_2026_05_17"
+      ],
+      "title": "Low Temperature Atlanta"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "bos",
+      "frequency": "daily",
+      "series_ticker": "KXLOWTBOS",
+      "source_provenance": [
+        "kalshi_public_series",
+        "kxlow_activation_2026_05_17"
+      ],
+      "title": "Low Temperature Boston"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "dal",
+      "frequency": "daily",
+      "series_ticker": "KXLOWTDAL",
+      "source_provenance": [
+        "kalshi_public_series",
+        "kxlow_activation_2026_05_17"
+      ],
+      "title": "Lowest temperature Dallas"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "dc",
+      "frequency": "daily",
+      "series_ticker": "KXLOWTDC",
+      "source_provenance": [
+        "kalshi_public_series",
+        "kxlow_activation_2026_05_17"
+      ],
+      "title": "Lowest Temperature DC "
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "hou",
+      "frequency": "daily",
+      "series_ticker": "KXLOWTHOU",
+      "source_provenance": [
+        "kalshi_public_series",
+        "kxlow_activation_2026_05_17"
+      ],
+      "title": "Low Temperature Houston"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "lv",
+      "frequency": "daily",
+      "series_ticker": "KXLOWTLV",
+      "source_provenance": [
+        "kalshi_public_series",
+        "kxlow_activation_2026_05_17"
+      ],
+      "title": "Las Vegas Daily Low Temperature"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "msp",
+      "frequency": "daily",
+      "series_ticker": "KXLOWTMIN",
+      "source_provenance": [
+        "kalshi_public_series",
+        "kxlow_activation_2026_05_17"
+      ],
+      "title": "Low  temperature Minnesota"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "nola",
+      "frequency": "daily",
+      "series_ticker": "KXLOWTNOLA",
+      "source_provenance": [
+        "kalshi_public_series",
+        "kxlow_activation_2026_05_17"
+      ],
+      "title": "NOLA Low Temperature"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "okc",
+      "frequency": "daily",
+      "series_ticker": "KXLOWTOKC",
+      "source_provenance": [
+        "kalshi_public_series",
+        "kxlow_activation_2026_05_17"
+      ],
+      "title": "Low Temperature Oklahoma City"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "phx",
+      "frequency": "daily",
+      "series_ticker": "KXLOWTPHX",
+      "source_provenance": [
+        "kalshi_public_series",
+        "kxlow_activation_2026_05_17"
+      ],
+      "title": "Low Temperature Phoenix"
+    },
+    {
+      "active_from": "2026-01-01T00:00:00+00:00",
+      "active_to": null,
+      "category": "Climate and Weather",
+      "city_id": "sat",
+      "frequency": "daily",
+      "series_ticker": "KXLOWTSATX",
+      "source_provenance": [
+        "kalshi_public_series",
+        "kxlow_activation_2026_05_17"
+      ],
+      "title": "Lowest Temperature SATX"
+    }
+  ],
+  "stations": [
+    {
+      "climate_product_id": "CLINYC",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 34,
+      "grid_y": 38,
+      "latitude": "40.7829",
+      "longitude": "-73.9654",
+      "metar_code": "KNYC",
+      "ncei_station_id": "USW00094728",
+      "nws_station_api_id": "KNYC",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHNY",
+        "https://forecast.weather.gov/product.php?site=OKX&issuedby=NYC&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "nyc-central-park",
+      "station_name": "Central Park",
+      "timezone": "America/New_York",
+      "wfo_office": "OKX"
+    },
+    {
+      "climate_product_id": "CLIPHL",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 48,
+      "grid_y": 72,
+      "latitude": "39.87327",
+      "longitude": "-75.22678",
+      "metar_code": "KPHL",
+      "ncei_station_id": "USW00013739",
+      "nws_station_api_id": "KPHL",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHPHIL",
+        "https://forecast.weather.gov/product.php?site=PHI&issuedby=PHL&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "phl-airport",
+      "station_name": "Philadelphia International Airport",
+      "timezone": "America/New_York",
+      "wfo_office": "PHI"
+    },
+    {
+      "climate_product_id": "CLIAUS",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 158,
+      "grid_y": 87,
+      "latitude": "30.18304",
+      "longitude": "-97.67987",
+      "metar_code": "KAUS",
+      "ncei_station_id": "USW00013904",
+      "nws_station_api_id": "KAUS",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHAUS",
+        "https://forecast.weather.gov/product.php?site=EWX&issuedby=AUS&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "aus-bergstrom",
+      "station_name": "Austin-Bergstrom International Airport",
+      "timezone": "America/Chicago",
+      "wfo_office": "EWX"
+    },
+    {
+      "climate_product_id": "CLIDEN",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 75,
+      "grid_y": 66,
+      "latitude": "39.84658",
+      "longitude": "-104.65622",
+      "metar_code": "KDEN",
+      "ncei_station_id": "USW00003017",
+      "nws_station_api_id": "KDEN",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHDEN",
+        "https://forecast.weather.gov/product.php?site=BOU&issuedby=DEN&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "den-airport",
+      "station_name": "Denver International Airport",
+      "timezone": "America/Denver",
+      "wfo_office": "BOU"
+    },
+    {
+      "climate_product_id": "CLIBOS",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 73,
+      "grid_y": 90,
+      "latitude": "42.36056",
+      "longitude": "-71.01056",
+      "metar_code": "KBOS",
+      "ncei_station_id": "USW00014739",
+      "nws_station_api_id": "KBOS",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHTBOS",
+        "https://forecast.weather.gov/product.php?site=BOX&issuedby=BOS&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "bos-logan",
+      "station_name": "Boston Logan International Airport",
+      "timezone": "America/New_York",
+      "wfo_office": "BOX"
+    },
+    {
+      "climate_product_id": "CLIMIA",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 105,
+      "grid_y": 51,
+      "latitude": "25.79056",
+      "longitude": "-80.31639",
+      "metar_code": "KMIA",
+      "ncei_station_id": "USW00012839",
+      "nws_station_api_id": "KMIA",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHMIA",
+        "https://forecast.weather.gov/product.php?site=MFL&issuedby=MIA&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "mia-airport",
+      "station_name": "Miami International Airport",
+      "timezone": "America/New_York",
+      "wfo_office": "MFL"
+    },
+    {
+      "climate_product_id": "CLIMDW",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 72,
+      "grid_y": 69,
+      "latitude": "41.78417",
+      "longitude": "-87.75528",
+      "metar_code": "KMDW",
+      "ncei_station_id": "USW00014819",
+      "nws_station_api_id": "KMDW",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHCHI",
+        "https://forecast.weather.gov/product.php?site=LOT&issuedby=MDW&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "chi-midway",
+      "station_name": "Chicago Midway Airport",
+      "timezone": "America/Chicago",
+      "wfo_office": "LOT"
+    },
+    {
+      "climate_product_id": "CLILAX",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 149,
+      "grid_y": 41,
+      "latitude": "33.93806",
+      "longitude": "-118.38889",
+      "metar_code": "KLAX",
+      "ncei_station_id": "USW00023174",
+      "nws_station_api_id": "KLAX",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHLAX",
+        "https://forecast.weather.gov/product.php?site=LOX&issuedby=LAX&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "lax-airport",
+      "station_name": "Los Angeles International Airport",
+      "timezone": "America/Los_Angeles",
+      "wfo_office": "LOX"
+    },
+    {
+      "climate_product_id": "CLIATL",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 50,
+      "grid_y": 82,
+      "latitude": "33.6367",
+      "longitude": "-84.4281",
+      "metar_code": "KATL",
+      "ncei_station_id": "USW00013874",
+      "nws_station_api_id": "KATL",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHTATL",
+        "https://forecast.weather.gov/product.php?site=FFC&issuedby=ATL&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "atl-hartsfield",
+      "station_name": "Hartsfield-Jackson International",
+      "timezone": "America/New_York",
+      "wfo_office": "FFC"
+    },
+    {
+      "climate_product_id": "CLIDFW",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 80,
+      "grid_y": 109,
+      "latitude": "32.8998",
+      "longitude": "-97.0403",
+      "metar_code": "KDFW",
+      "ncei_station_id": "USW00003927",
+      "nws_station_api_id": "KDFW",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHTDAL",
+        "https://forecast.weather.gov/product.php?site=FWD&issuedby=DFW&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "dal-dfw",
+      "station_name": "Dallas-Fort Worth International",
+      "timezone": "America/Chicago",
+      "wfo_office": "FWD"
+    },
+    {
+      "climate_product_id": "CLIDCA",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 97,
+      "grid_y": 69,
+      "latitude": "38.8512",
+      "longitude": "-77.0402",
+      "metar_code": "KDCA",
+      "ncei_station_id": "USW00013743",
+      "nws_station_api_id": "KDCA",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHTDC",
+        "https://forecast.weather.gov/product.php?site=LWX&issuedby=DCA&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "dc-reagan-national",
+      "station_name": "Reagan National Airport",
+      "timezone": "America/New_York",
+      "wfo_office": "LWX"
+    },
+    {
+      "climate_product_id": "CLIIAH",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 64,
+      "grid_y": 104,
+      "latitude": "29.9844",
+      "longitude": "-95.3414",
+      "metar_code": "KIAH",
+      "ncei_station_id": "USW00012960",
+      "nws_station_api_id": "KIAH",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHTHOU",
+        "https://forecast.weather.gov/product.php?site=HGX&issuedby=IAH&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "hou-iah",
+      "station_name": "George Bush Intercontinental",
+      "timezone": "America/Chicago",
+      "wfo_office": "HGX"
+    },
+    {
+      "climate_product_id": "CLILAS",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 122,
+      "grid_y": 94,
+      "latitude": "36.084",
+      "longitude": "-115.1537",
+      "metar_code": "KLAS",
+      "ncei_station_id": "USW00023169",
+      "nws_station_api_id": "KLAS",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHTLV",
+        "https://forecast.weather.gov/product.php?site=VEF&issuedby=LAS&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "lv-mccarran",
+      "station_name": "Harry Reid International",
+      "timezone": "America/Los_Angeles",
+      "wfo_office": "VEF"
+    },
+    {
+      "climate_product_id": "CLIMSP",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 110,
+      "grid_y": 68,
+      "latitude": "44.8848",
+      "longitude": "-93.2223",
+      "metar_code": "KMSP",
+      "ncei_station_id": "USW00014922",
+      "nws_station_api_id": "KMSP",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHTMIN",
+        "https://forecast.weather.gov/product.php?site=MPX&issuedby=MSP&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "msp-airport",
+      "station_name": "Minneapolis-St. Paul International",
+      "timezone": "America/Chicago",
+      "wfo_office": "MPX"
+    },
+    {
+      "climate_product_id": "CLIMSY",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 60,
+      "grid_y": 90,
+      "latitude": "29.9934",
+      "longitude": "-90.258",
+      "metar_code": "KMSY",
+      "ncei_station_id": "USW00012916",
+      "nws_station_api_id": "KMSY",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHTNOLA",
+        "https://forecast.weather.gov/product.php?site=LIX&issuedby=MSY&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "nola-msy",
+      "station_name": "Louis Armstrong International",
+      "timezone": "America/Chicago",
+      "wfo_office": "LIX"
+    },
+    {
+      "climate_product_id": "CLIOKC",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 94,
+      "grid_y": 90,
+      "latitude": "35.3931",
+      "longitude": "-97.6007",
+      "metar_code": "KOKC",
+      "ncei_station_id": "USW00013967",
+      "nws_station_api_id": "KOKC",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHTOKC",
+        "https://forecast.weather.gov/product.php?site=OUN&issuedby=OKC&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "okc-will-rogers",
+      "station_name": "Will Rogers World Airport",
+      "timezone": "America/Chicago",
+      "wfo_office": "OUN"
+    },
+    {
+      "climate_product_id": "CLIPHX",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 161,
+      "grid_y": 57,
+      "latitude": "33.4373",
+      "longitude": "-112.0078",
+      "metar_code": "KPHX",
+      "ncei_station_id": "USW00023183",
+      "nws_station_api_id": "KPHX",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHTPHX",
+        "https://forecast.weather.gov/product.php?site=PSR&issuedby=PHX&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "phx-sky-harbor",
+      "station_name": "Sky Harbor International",
+      "timezone": "America/Phoenix",
+      "wfo_office": "PSR"
+    },
+    {
+      "climate_product_id": "CLISAT",
+      "climate_timezone_basis": "LOCAL_STANDARD_TIME",
+      "grid_x": 127,
+      "grid_y": 59,
+      "latitude": "29.5337",
+      "longitude": "-98.4698",
+      "metar_code": "KSAT",
+      "ncei_station_id": "USW00012921",
+      "nws_station_api_id": "KSAT",
+      "source_urls": [
+        "https://api.elections.kalshi.com/trade-api/v2/series/KXHIGHTSATX",
+        "https://forecast.weather.gov/product.php?site=EWX&issuedby=SAT&product=CLI&format=TXT&version=1&glossary=0"
+      ],
+      "station_id": "sat-airport",
+      "station_name": "San Antonio International",
+      "timezone": "America/Chicago",
+      "wfo_office": "EWX"
+    }
+  ],
+  "version": "seed_v5_18cities_high_only"
+}
