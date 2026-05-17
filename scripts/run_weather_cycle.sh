@@ -38,8 +38,12 @@ export KALSHI_PRIVATE_KEY_PATH="/Users/varmakammili/.kalshi/private_key.pem"
 # To fully disable live orders: set LIVE_ORDERS_ENABLED=0.
 : ${LIVE_ORDERS_ENABLED:=1}
 : ${LIVE_ORDERS_DRY_RUN:=0}
-# Day-1 cap: $15. 1 contract per market still hardcoded in live_execution.py.
-: ${LIVE_DAILY_USD_CAP:=15.0}
+# Raised 2026-05-17 evening: $15 → $20. After capturing high-conviction
+# bets through the day, we had ~$1.74 headroom left and the bot was
+# turning down marginal-EV trades. User accepted +$5 of incremental risk
+# to see what the bot does with extended headroom. Revert to $15 if
+# net realized P&L tomorrow doesn't justify the expansion.
+: ${LIVE_DAILY_USD_CAP:=20.0}
 export LIVE_ORDERS_ENABLED LIVE_ORDERS_DRY_RUN LIVE_DAILY_USD_CAP
 
 ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
