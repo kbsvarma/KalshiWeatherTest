@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.varmakammili.kalshi.weather.cycle.backup</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>/Users/varmakammili/Documents/GitHub/KalshiWeatherTest/scripts/run_weather_cycle.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/varmakammili/Documents/GitHub/KalshiWeatherTest</string>
+
+  <!--
+  Backup cycle — fires at :15 and :45, offset 15 min from the primary
+  (which fires at :00 and :30). The lock file at logs/cycle.lock prevents
+  the backup from running when the primary just ran successfully. The
+  backup only does real work if the primary failed for a transient reason
+  (network, server hiccup) and the lock has aged past its TTL.
+
+  Does NOT protect against macOS TCC permission revocation — that affects
+  both this plist and the primary since both call /bin/zsh on the same
+  script. For that we'd need cron-installed too.
+  -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict>
+      <key>Minute</key><integer>15</integer>
+    </dict>
+    <dict>
+      <key>Minute</key><integer>45</integer>
+    </dict>
+  </array>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/varmakammili/Documents/GitHub/KalshiWeatherTest/logs/launchd_cycle_backup.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/varmakammili/Documents/GitHub/KalshiWeatherTest/logs/launchd_cycle_backup.stderr.log</string>
+</dict>
+</plist>

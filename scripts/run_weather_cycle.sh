@@ -51,6 +51,24 @@ write_heartbeat() {
   printf 'phase=%s\nutc=%s\nhost_pid=%s\n' "$1" "$(ts)" "$$" > "$HEARTBEAT_FILE"
 }
 
+# Inter-scheduler dedup — if BOTH launchd AND cron fire within the same
+# minute (clock slop), only one should run. Use a lock file with a short
+# TTL to coordinate.
+LOCK_FILE="$LOG_DIR/cycle.lock"
+LOCK_TTL_SECONDS=270  # cycle should never exceed 4 min; lock auto-expires
+if [[ -f "$LOCK_FILE" ]]; then
+  lock_age=$(( $(date +%s) - $(stat -f %m "$LOCK_FILE") ))
+  if (( lock_age < LOCK_TTL_SECONDS )); then
+    echo "[$(ts)] another cycle holds lock (age ${lock_age}s) — skipping" >> "$LOG_FILE"
+    exit 0
+  fi
+  # Stale lock — clear it
+  rm -f "$LOCK_FILE"
+fi
+echo $$ > "$LOCK_FILE"
+# Always clean up on exit
+trap 'rm -f "$LOCK_FILE"' EXIT
+
 write_heartbeat "cycle_start"
 echo "[$(ts)] ────── cycle start ──────" >> "$LOG_FILE"
 
