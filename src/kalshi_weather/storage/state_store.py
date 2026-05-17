@@ -474,6 +474,24 @@ class SQLiteStateStore:
                 ),
             )
 
+    def delete_shadow_fill(self, shadow_fill_id: str) -> None:
+        """Roll back a shadow_fill row — used when live execution gets
+        blocked AFTER the shadow was recorded, so DB doesn't claim a
+        position we don't actually hold."""
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM shadow_fills WHERE shadow_fill_id = ?",
+                (shadow_fill_id,),
+            )
+
+    def delete_shadow_position(self, city_id: str, market_ticker: str) -> None:
+        """Roll back a shadow_position row — paired with delete_shadow_fill."""
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM shadow_positions WHERE city_id = ? AND market_ticker = ?",
+                (city_id, market_ticker),
+            )
+
     def list_decision_payloads(self, city_id: str | None = None) -> list[dict[str, Any]]:
         query = "SELECT payload_json FROM decisions"
         params: tuple[Any, ...] = ()

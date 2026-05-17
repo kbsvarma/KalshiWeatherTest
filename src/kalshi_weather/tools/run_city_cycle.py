@@ -406,6 +406,21 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
                     elif live_result.blocker_reason and live_result.blocker_reason != "live_orders_disabled_via_env":
                         print(f"[LIVE-EXEC] BLOCKED {result.explanation.market_ticker}: "
                               f"{live_result.blocker_reason}")
+                        # Roll back the shadow row we wrote a moment ago — we
+                        # don't actually hold this position on Kalshi. Without
+                        # rollback, dedup blocks the next cycle from re-trying
+                        # this same edge and the shadow_positions table claims
+                        # exposure we don't have. (2026-05-17 bug.)
+                        try:
+                            state_store.delete_shadow_fill(shadow.fill.shadow_fill_id)
+                            state_store.delete_shadow_position(
+                                city_profile.city_id, result.explanation.market_ticker
+                            )
+                            print(f"[LIVE-EXEC] rolled back shadow_fill for "
+                                  f"{result.explanation.market_ticker}")
+                            shadow = None
+                        except Exception as rb_exc:
+                            print(f"[LIVE-EXEC] WARN: shadow rollback failed: {rb_exc}")
             if recommendation_id is not None:
                 try:
                     if shadow is not None and shadow.fill is not None:

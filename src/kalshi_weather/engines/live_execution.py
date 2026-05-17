@@ -142,12 +142,20 @@ def _daily_live_spend(store: SQLiteStateStore) -> float:
 
 
 def _market_already_traded_today(store: SQLiteStateStore, market_ticker: str) -> bool:
+    """Has a REAL Kalshi order been placed for this market today?
+
+    Filters out DRY_RUN_PREVIEW and ERROR rows — dedup is about real exposure,
+    not about what we considered. (2026-05-17 bug: dry-run pollution from
+    a manual test blocked the next real cycle from firing the same edge.)
+    """
     today = datetime.now(timezone.utc).date().isoformat()
     try:
         with store._connect() as conn:
             row = conn.execute(
                 "SELECT count(*) FROM live_orders "
-                "WHERE market_ticker = ? AND substr(created_at, 1, 10) = ?",
+                "WHERE market_ticker = ? "
+                "AND substr(created_at, 1, 10) = ? "
+                "AND status NOT IN ('DRY_RUN_PREVIEW', 'ERROR')",
                 (market_ticker, today),
             ).fetchone()
         return bool(row and int(row[0]) > 0)
