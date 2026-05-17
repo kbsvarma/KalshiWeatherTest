@@ -55,7 +55,13 @@ write_heartbeat() {
 # minute (clock slop), only one should run. Use a lock file with a short
 # TTL to coordinate.
 LOCK_FILE="$LOG_DIR/cycle.lock"
-LOCK_TTL_SECONDS=270  # cycle should never exceed 4 min; lock auto-expires
+# 2026-05-17: raised from 270 → 420. Cycles now take 250-310s after KXLOW
+# activation doubled the market count. Old 270s TTL was expiring before
+# the cycle finished, allowing the next scheduled slot's cycle to start
+# overlapping. Two cycles writing to the same DB and heartbeat is bad
+# state. 420 = 7 min, comfortably above MAX_CYCLE_SECONDS (360) plus
+# slack for the SIGALRM signal-delivery delay.
+LOCK_TTL_SECONDS=420
 if [[ -f "$LOCK_FILE" ]]; then
   lock_age=$(( $(date +%s) - $(stat -f %m "$LOCK_FILE") ))
   if (( lock_age < LOCK_TTL_SECONDS )); then
