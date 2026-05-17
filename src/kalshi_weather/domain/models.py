@@ -187,6 +187,11 @@ class CurrentStateEstimate:
     # uncertainty (rationale: high regime change = forecast is on shakier
     # ground). None means "no settlement on file" — gracefully degrades.
     yesterday_high_f: Decimal | None = None
+    # External-signal observability (2026-05-17). All optional — None means
+    # "signal not available, gracefully degrade".
+    spc_outlook_rank: int = 0  # 0=none, 2=MRGL, 3=SLGT, 4=ENH, 5=MDT, 6=HIGH
+    afd_confidence: str | None = None  # "low" | "moderate" | "high"
+    afd_model_spread_flag: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)

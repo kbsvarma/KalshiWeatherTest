@@ -221,6 +221,9 @@ def build_current_state_estimate(
     as_of_time: datetime,
     station_timezone: str | None = None,
     yesterday_high_f: Decimal | None = None,
+    spc_outlook_rank: int = 0,
+    afd_confidence: str | None = None,
+    afd_model_spread_flag: bool | None = None,
 ) -> CurrentStateEstimate:
     if not observations:
         raise ValueError("observations are required")
@@ -408,4 +411,7 @@ def build_current_state_estimate(
         confidence_downgrade=confidence_downgrade,
         provenance_refs=tuple(obs.source_payload_id for obs in observations[:2]),
         yesterday_high_f=yesterday_high_f,
+        spc_outlook_rank=spc_outlook_rank,
+        afd_confidence=afd_confidence,
+        afd_model_spread_flag=afd_model_spread_flag,
     )

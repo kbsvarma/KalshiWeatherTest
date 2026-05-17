@@ -369,10 +369,11 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
     if qualification is None:
         return None
 
-    # ── External signals (observability only — NOT yet feeding decisions) ──
+    # ── External signals (now LIVE — feed path engine via current_state) ──
     # AFD: pulled per WFO, extracted by local LLM (Ollama), cached by
     # AFD product id so we only pay 4 LLM calls per WFO per day.
-    afd_signals_log = None
+    afd_confidence: str | None = None
+    afd_model_spread_flag: bool | None = None
     try:
         afd_product = NwsAfdClient.fetch_latest(station.wfo_office)
         if afd_product and afd_product.raw_text:
@@ -381,15 +382,12 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
                 product_id=afd_product.product_id,
                 afd_text=afd_product.raw_text,
             )
-            afd_signals_log = {
-                "wfo": station.wfo_office,
-                "confidence": extraction.confidence,
-                "model_spread_flag": extraction.model_spread_flag,
-                "regime": extraction.regime,
-                "high_f": extraction.mentioned_today_high_f,
-                "failed": extraction.extraction_failed,
-            }
-            print(f"[AFD] {city_profile.city_id}: {afd_signals_log}")
+            afd_confidence = extraction.confidence
+            afd_model_spread_flag = extraction.model_spread_flag
+            print(f"[AFD] {city_profile.city_id}: "
+                  f"wfo={station.wfo_office} conf={extraction.confidence} "
+                  f"spread={extraction.model_spread_flag} regime={extraction.regime} "
+                  f"failed={extraction.extraction_failed}")
     except Exception as exc:  # never fatal
         print(f"[AFD] {city_profile.city_id}: lookup failed: {exc}")
 
@@ -550,6 +548,9 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
                 open_position_signals=decision_open_position_signals,
                 active_kill_switch=active_kill_switch,
                 yesterday_high_f=_yesterday_high_for_market(market_date),
+                spc_outlook_rank=(spc_for_station.rank if spc_for_station else 0),
+                afd_confidence=afd_confidence,
+                afd_model_spread_flag=afd_model_spread_flag,
             )
         except SettlementRuleParseError:
             continue

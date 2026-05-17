@@ -372,6 +372,9 @@ def run_market_decision_cycle(
     active_kill_switch: bool = False,
     as_of_time: datetime | None = None,
     yesterday_high_f: Decimal | None = None,
+    spc_outlook_rank: int = 0,
+    afd_confidence: str | None = None,
+    afd_model_spread_flag: bool | None = None,
 ) -> DecisionCycleResult:
     as_of_time = as_of_time or datetime.now(timezone.utc)
     settlement_rule = parse_settlement_rule(market_definition, station)
@@ -414,6 +417,9 @@ def run_market_decision_cycle(
         as_of_time=as_of_time,
         yesterday_high_f=yesterday_high_f,
         station_timezone=station.timezone,
+        spc_outlook_rank=spc_outlook_rank,
+        afd_confidence=afd_confidence,
+        afd_model_spread_flag=afd_model_spread_flag,
     )
     path_result = apply_path_adjustment(
         distribution=forecast_result.distribution,
@@ -765,6 +771,9 @@ def run_market_decision_cycle(
             "current_temp_est_f": str(current_state.current_temp_est_f),
             "current_temp_sigma_f": str(current_state.current_temp_sigma_f),
             "shock_risk_score": str(current_state.shock_risk_score),
+            "spc_outlook_rank": current_state.spc_outlook_rank,
+            "afd_confidence": current_state.afd_confidence,
+            "afd_model_spread_flag": current_state.afd_model_spread_flag,
         },
         forecast_summary={
             "provider_weights": {k: str(v) for k, v in forecast_result.provider_weights.items()},

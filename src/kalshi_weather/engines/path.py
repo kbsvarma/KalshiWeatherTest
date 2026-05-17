@@ -268,9 +268,37 @@ def apply_path_adjustment(
             ramp = min(Decimal("1"), max(Decimal("0"), ramp))
             persistence_uncertainty_addon = ramp * Decimal("0.05")
 
+    # SPC convective outlook → uncertainty. Convection is non-linear and
+    # our daily-max prediction is unreliable when SPC flags risk.
+    # Conservative additions: small bump per rank tier.
+    spc_uncertainty_addon = Decimal("0")
+    if current_state.spc_outlook_rank == 2:    # MRGL
+        spc_uncertainty_addon = Decimal("0.01")
+    elif current_state.spc_outlook_rank == 3:  # SLGT
+        spc_uncertainty_addon = Decimal("0.03")
+    elif current_state.spc_outlook_rank == 4:  # ENH
+        spc_uncertainty_addon = Decimal("0.06")
+    elif current_state.spc_outlook_rank >= 5:  # MDT / HIGH
+        spc_uncertainty_addon = Decimal("0.10")
+
+    # AFD forecaster narrative → uncertainty.
+    afd_uncertainty_addon = Decimal("0")
+    if current_state.afd_confidence == "low":
+        afd_uncertainty_addon += Decimal("0.02")
+    elif current_state.afd_confidence == "high":
+        afd_uncertainty_addon -= Decimal("0.01")  # small confidence boost
+    if current_state.afd_model_spread_flag is True:
+        afd_uncertainty_addon += Decimal("0.03")
+    # Cap the AFD contribution at [0, 0.05] so a bad LLM extraction
+    # cannot dominate.
+    afd_uncertainty_addon = max(Decimal("0"), min(Decimal("0.05"), afd_uncertainty_addon))
+
     path_uncertainty_addon = min(
         Decimal("0.25"),
-        base_path_uncertainty_addon + persistence_uncertainty_addon,
+        base_path_uncertainty_addon
+        + persistence_uncertainty_addon
+        + spc_uncertainty_addon
+        + afd_uncertainty_addon,
     )
 
     path_state = PathProgressState(
