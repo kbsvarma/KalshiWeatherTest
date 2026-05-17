@@ -1005,6 +1005,57 @@ class SQLiteStateStore:
 
     # ── Market recommendations (every decision → counterfactual P&L) ────────
 
+    def save_cycle_selection(
+        self,
+        *,
+        cycle_run_id: str,
+        cycle_start_utc: str,
+        candidate: dict[str, Any],
+        outcome: str,
+        rank_in_cycle: int | None = None,
+    ) -> None:
+        """Persist one selector candidate to cycle_selections.
+
+        outcome: 'accepted' | 'rejected' | 'deferred'. Persists across
+        log rotation — we can always reconstruct why a market was or
+        wasn't selected for a fill.
+        """
+        from datetime import datetime as _dt, timezone as _tz
+        def _f(v: Any) -> float | None:
+            if v is None or v == "":
+                return None
+            try:
+                return float(v)
+            except Exception:
+                return None
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO cycle_selections "
+                "(cycle_run_id, cycle_start_utc, market_ticker, city_id, side, "
+                " outcome, rank_in_cycle, exec_ev, p_model, p_market, "
+                " cost_per_contract, spread_f, tradability, rejection_reason, "
+                " deferred_reason, recorded_at_utc) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    cycle_run_id,
+                    cycle_start_utc,
+                    str(candidate.get("market_ticker") or ""),
+                    candidate.get("city_id"),
+                    candidate.get("side"),
+                    outcome,
+                    rank_in_cycle,
+                    _f(candidate.get("exec_ev")),
+                    _f(candidate.get("p_model")),
+                    _f(candidate.get("market_price")),
+                    _f(candidate.get("cost_per_contract")),
+                    _f(candidate.get("provider_spread_f")),
+                    _f(candidate.get("tradability")),
+                    candidate.get("rejection_reason"),
+                    candidate.get("deferred_reason"),
+                    _dt.now(_tz.utc).isoformat(),
+                ),
+            )
+
     def save_market_recommendation(self, record: dict[str, Any]) -> None:
         """Insert or update a recommendation row.
 

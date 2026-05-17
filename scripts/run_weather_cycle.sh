@@ -13,8 +13,10 @@ LOG_FILE="$LOG_DIR/cron_cycle.log"
 
 mkdir -p "$LOG_DIR"
 
-# Rotate log if > 5 MB
-if [[ -f "$LOG_FILE" && $(stat -f%z "$LOG_FILE") -gt 5242880 ]]; then
+# Rotate log if > 50 MB (was 5 MB — rotated too aggressively, lost selector
+# traces within hours. Real audit trail now lives in cycle_selections table
+# which persists across rotations regardless.)
+if [[ -f "$LOG_FILE" && $(stat -f%z "$LOG_FILE") -gt 52428800 ]]; then
   mv "$LOG_FILE" "$LOG_FILE.$(date +%Y%m%d_%H%M%S)"
 fi
 

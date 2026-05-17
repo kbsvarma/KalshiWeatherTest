@@ -670,7 +670,9 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
                 if live_result is not None:
                     if live_result.placed:
                         print(f"[LIVE-EXEC] ✓ PLACED {result.explanation.market_ticker} "
-                              f"{result.selected_edge.side} {live_result.quantity}@{live_result.price_cents}c")
+                              f"{result.selected_edge.side} {live_result.quantity}@{live_result.price_cents}c "
+                              f"[p_model={float(result.selected_edge.p_model):.3f}, "
+                              f"exec_ev=${float(result.selected_edge.executable_ev_per_contract):.3f}]")
                     elif live_result.dry_run:
                         print(f"[LIVE-EXEC] DRY-RUN preview {result.explanation.market_ticker} "
                               f"{result.selected_edge.side} {live_result.quantity}@{live_result.price_cents}c")

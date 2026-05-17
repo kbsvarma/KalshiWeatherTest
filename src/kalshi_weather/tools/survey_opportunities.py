@@ -607,6 +607,44 @@ def main() -> None:
         already_open_keys=open_keys,
     )
 
+    # ── Persist selector decisions to DB for audit-grade durability ──
+    # Logs rotate; this table doesn't. Every selector candidate's outcome
+    # is recorded so we can always reconstruct WHY a market was or wasn't
+    # filled, even months later.
+    try:
+        from datetime import datetime, timezone
+        cycle_run_id = uuid4().hex if False else __import__("uuid").uuid4().hex
+        cycle_start_utc = datetime.now(timezone.utc).isoformat()
+        accepted = volume_selection.get("selected") or []
+        deferred = volume_selection.get("deferred") or []
+        rejected = volume_selection.get("rejected") or []
+        for i, c in enumerate(accepted):
+            store.save_cycle_selection(
+                cycle_run_id=cycle_run_id, cycle_start_utc=cycle_start_utc,
+                candidate=c, outcome="accepted", rank_in_cycle=i + 1,
+            )
+        for c in deferred:
+            store.save_cycle_selection(
+                cycle_run_id=cycle_run_id, cycle_start_utc=cycle_start_utc,
+                candidate=c, outcome="deferred", rank_in_cycle=None,
+            )
+        for c in rejected:
+            store.save_cycle_selection(
+                cycle_run_id=cycle_run_id, cycle_start_utc=cycle_start_utc,
+                candidate=c, outcome="rejected", rank_in_cycle=None,
+            )
+        # Per-fill audit line — explicitly logs the selector ranking each
+        # cycle so even a tail of the log shows what was picked.
+        if accepted:
+            top = ", ".join(
+                f"#{i+1} {c.get('market_ticker')}@${float(c.get('cost_per_contract', 0)):.2f}"
+                f" ev=${float(c.get('exec_ev', 0)):.3f}"
+                for i, c in enumerate(accepted[:5])
+            )
+            print(f"[SELECTED] cycle {cycle_run_id[:8]}: {len(accepted)} accepted — {top}")
+    except Exception as exc:
+        print(f"[WARN] cycle_selections persistence failed: {exc}")
+
     # Keep the opportunity board for diagnostic purposes (also feeds JSON dump).
     same_day_board = build_opportunity_board(
         decisions,

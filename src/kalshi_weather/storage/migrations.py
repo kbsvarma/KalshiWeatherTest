@@ -125,6 +125,40 @@ def _m_20260517_02_recommendations_extra_columns(conn: sqlite3.Connection) -> No
             )
 
 
+def _m_20260517_03_cycle_selections(conn: sqlite3.Connection) -> None:
+    """Audit-grade durable record of selector decisions, one row per
+    (cycle_run_id, market_ticker). Persists across log rotation so we
+    can always reconstruct WHY a market was/wasn't filled, even months
+    later. No more 'logs rotated, can't tell what happened.'"""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS cycle_selections (
+            cycle_run_id TEXT NOT NULL,
+            cycle_start_utc TEXT NOT NULL,
+            market_ticker TEXT NOT NULL,
+            city_id TEXT,
+            side TEXT,
+            outcome TEXT NOT NULL,  -- 'accepted' | 'rejected' | 'deferred'
+            rank_in_cycle INTEGER,
+            exec_ev REAL,
+            p_model REAL,
+            p_market REAL,
+            cost_per_contract REAL,
+            spread_f REAL,
+            tradability REAL,
+            rejection_reason TEXT,
+            deferred_reason TEXT,
+            recorded_at_utc TEXT NOT NULL,
+            PRIMARY KEY (cycle_run_id, market_ticker)
+        );
+        CREATE INDEX IF NOT EXISTS idx_cycle_selections_ticker
+            ON cycle_selections(market_ticker, cycle_start_utc DESC);
+        CREATE INDEX IF NOT EXISTS idx_cycle_selections_outcome
+            ON cycle_selections(outcome, cycle_start_utc DESC);
+        """
+    )
+
+
 MIGRATIONS: list[Migration] = [
     Migration(
         migration_id="20260517_01_shadow_positions_pk",
@@ -135,5 +169,10 @@ MIGRATIONS: list[Migration] = [
         migration_id="20260517_02_recommendations_extra_columns",
         description="Add signal-timing columns to market_recommendations",
         apply=_m_20260517_02_recommendations_extra_columns,
+    ),
+    Migration(
+        migration_id="20260517_03_cycle_selections",
+        description="Audit table for volume-grinder selector decisions",
+        apply=_m_20260517_03_cycle_selections,
     ),
 ]
