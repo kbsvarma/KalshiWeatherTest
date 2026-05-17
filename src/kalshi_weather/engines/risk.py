@@ -7,7 +7,17 @@ from kalshi_weather.domain.models import CurrentStateEstimate, RiskDecision, Tra
 from kalshi_weather.engines.ev import DecisionThresholds
 
 
-PORTFOLIO_RISK_LIMIT = Decimal("1.80")
+# Raised 2026-05-17 from 1.80 → 5.0 after auditing 1086 morning decisions
+# showed `portfolio_risk_limit` blocking 600 of them. The 1.80 cap was
+# calibrated for the old single-position-per-city era; after enabling
+# multi-bracket-per-city (up to 3 markets/city × 18 cities = 54 possible
+# positions), the risk-unit sqrt() math meant 7 open positions ALREADY
+# exceeded 1.80 and no new bets could pass. The hard $15/day USD cap at
+# live_execution.py plus the 3-markets-per-city dedup are the real
+# concentration controls; this limit's job is to catch pathological
+# correlation cases, not to block every cycle. 5.0 = sqrt(25) which lines
+# up with the rough max bet count ($15 / $0.60 avg ≈ 25 contracts).
+PORTFOLIO_RISK_LIMIT = Decimal("5.0")
 
 
 def build_risk_decision(

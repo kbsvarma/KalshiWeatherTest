@@ -24,7 +24,15 @@ class ShadowApplicationResult:
 # *would* be bet live vs what's recorded in shadow.
 _VOLUME_GRINDER_MIN_P = Decimal("0.70")
 _VOLUME_GRINDER_MAX_P = Decimal("0.97")
-_VOLUME_GRINDER_MAX_SPREAD_F = Decimal("8.0")    # model-consensus check
+# Raised 2026-05-17 from 8.0 → 10.0 after data showed it was leaving real
+# edge on the table. Audit (n=148 TAKER_ALLOWED candidates) found 69
+# strong-favorite candidates with EV up to $0.13/contract being blocked
+# because morning forecast spreads run 8-12°F (vs evening 5-7°F). The
+# 8.0 cap was tuned from last night's 7 successful fills which all happened
+# to be in the 5.7-7.1°F range — but those weren't a ceiling, just where
+# the bot fired late at night. 10.0 still excludes the genuinely noisy
+# 15-25°F spread markets while letting morning-window favorites through.
+_VOLUME_GRINDER_MAX_SPREAD_F = Decimal("10.0")    # model-consensus check
 _VOLUME_GRINDER_MIN_EXEC_EV = Decimal("0.005")    # 0.5¢
 _VOLUME_GRINDER_MIN_TRADABILITY = Decimal("0.55")
 
