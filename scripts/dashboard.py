@@ -572,20 +572,18 @@ st.markdown(
 )
 
 
-# Top bar: clock + refresh
-top_l, top_r = st.columns([10, 2])
-with top_r:
-    sub_l, sub_r = st.columns([1, 1])
-    with sub_l:
-        st.markdown(
-            f"<div class='kxw-clock' style='text-align:center;'>"
-            f"{datetime.now(ET).strftime('%I:%M:%S %p ET')}</div>",
-            unsafe_allow_html=True,
-        )
-    with sub_r:
-        if st.button("↻ Refresh", use_container_width=True, type="primary"):
-            st.cache_data.clear()
-            st.rerun()
+# Top bar: clock + refresh — wider columns so neither wraps
+top_l, top_clock, top_btn = st.columns([8, 1.5, 1])
+with top_clock:
+    st.markdown(
+        f"<div class='kxw-clock' style='text-align:center;white-space:nowrap;'>"
+        f"{datetime.now(ET).strftime('%I:%M:%S %p ET')}</div>",
+        unsafe_allow_html=True,
+    )
+with top_btn:
+    if st.button("↻ Refresh", use_container_width=True, type="primary"):
+        st.cache_data.clear()
+        st.rerun()
 
 # Load data
 health = load_health_status()
@@ -726,11 +724,12 @@ with tab_session:
     if report_md.strip().startswith("_"):
         _empty(report_md.strip("_ "))
     else:
-        st.markdown(
-            f"<div style='background:#fff;border:1px solid #e5e7eb;border-radius:10px;"
-            f"padding:18px 22px;'>{report_md}</div>",
-            unsafe_allow_html=True,
-        )
+        # Render markdown natively (parsing happens correctly) and style
+        # the wrapping container via CSS, not raw HTML. Wrapping markdown
+        # in <div>...{report_md}</div> with unsafe_allow_html stops the
+        # markdown parser from rendering tables.
+        with st.container(border=True):
+            st.markdown(report_md)
 
     _section("Open positions")
     if positions_df.empty:
