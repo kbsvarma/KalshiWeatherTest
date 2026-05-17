@@ -54,6 +54,13 @@ write_heartbeat() {
 write_heartbeat "cycle_start"
 echo "[$(ts)] ────── cycle start ──────" >> "$LOG_FILE"
 
+# Ensure Ollama daemon is up for AFD extraction. Non-fatal if it fails —
+# afd_extractor.py degrades gracefully (returns extraction_failed=True).
+if ! curl -sf http://localhost:11434/api/tags >/dev/null 2>&1; then
+  /usr/local/bin/ollama serve >> "$LOG_DIR/ollama.log" 2>&1 &
+  sleep 2
+fi
+
 # Run city cycle — full output goes to log, with summary at the end
 if "$PY" -m kalshi_weather.tools.run_city_cycle >>"$LOG_FILE" 2>&1; then
   echo "[$(ts)] run_city_cycle OK" >> "$LOG_FILE"
