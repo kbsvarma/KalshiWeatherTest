@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import markdown as md_lib
 import pandas as pd
 import streamlit as st
 
@@ -438,14 +439,41 @@ st.markdown(
     }
     /* Reset Streamlit defaults */
     section[data-testid="stSidebar"] { display: none; }
-    [data-testid="stHeader"] { background: transparent; height: 0; }
+    [data-testid="stHeader"] {
+        background: transparent !important;
+        height: 0 !important;
+        display: none !important;
+        border: none !important;
+    }
     div[data-testid="stToolbar"] { display: none; }
-    /* Containers — clean white cards with thin borders */
+    /* We do NOT style stVerticalBlockBorderWrapper globally. Cards are
+       drawn explicitly via .kxw-card div wrappers. Streamlit's own
+       container chrome stays invisible. */
     div[data-testid="stVerticalBlockBorderWrapper"] {
-        background: #ffffff;
-        border: 1px solid #e5e7eb !important;
-        border-radius: 10px;
+        background: transparent !important;
+        border: none !important;
         box-shadow: none !important;
+    }
+    /* Force light theme on dataframes (was rendering with dark theme) */
+    div[data-testid="stDataFrame"],
+    div[data-testid="stDataFrameResizable"] {
+        background: #ffffff !important;
+        border: 1px solid #e5e7eb !important;
+        border-radius: 8px !important;
+        color-scheme: light !important;
+    }
+    div[data-testid="stDataFrame"] *,
+    div[data-testid="stDataFrameResizable"] * {
+        color: #111827 !important;
+    }
+    div[data-testid="stDataFrame"] [data-testid="stTableHeaderCell"] {
+        background: #f9fafb !important;
+        color: #6b7280 !important;
+        font-weight: 600 !important;
+        font-size: 12px !important;
+    }
+    div[data-testid="stDataFrame"] [data-testid="stTableDataCell"] {
+        font-size: 13px !important;
     }
     /* Tabs — clean text with underline */
     button[data-baseweb="tab"] {
@@ -536,6 +564,152 @@ st.markdown(
         display: flex; align-items: center; justify-content: center;
         font-size: 22px;
     }
+    /* Generic card wrapper used in multiple places */
+    .kxw-card {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 20px 24px;
+        margin-bottom: 12px;
+    }
+    /* Latest cycle summary card — outer wrapper */
+    .kxw-report-card {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 20px 24px;
+    }
+    /* Table styling inside report markdown */
+    .kxw-report-wrap table { width: 100%; }
+    .kxw-report-wrap tr:hover { background: #fafbfc; }
+    /* Inline code spans (`like_this`) — light pill, NOT dark */
+    .kxw-report-wrap code {
+        background: #f3f4f6 !important;
+        color: #374151 !important;
+        padding: 1px 6px !important;
+        border-radius: 4px !important;
+        font-size: 11.5px !important;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace !important;
+        font-weight: 500 !important;
+    }
+    /* Fenced code blocks inside reports */
+    .kxw-report-wrap pre {
+        background: #f9fafb !important;
+        border: 1px solid #e5e7eb !important;
+        border-radius: 6px !important;
+        padding: 10px 14px !important;
+        font-size: 11.5px !important;
+    }
+    .kxw-report-wrap pre code {
+        background: transparent !important;
+        padding: 0 !important;
+    }
+    /* Stand-alone HTML tables (Open Positions, Decision Breakdown, etc.) */
+    .kxw-html-table {
+        width: 100%;
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: 13px;
+        overflow: hidden;
+        margin-bottom: 8px;
+    }
+    .kxw-html-table thead th {
+        background: #f9fafb;
+        color: #6b7280;
+        font-weight: 600;
+        font-size: 11px;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        padding: 10px 14px;
+        text-align: left;
+        border-bottom: 1px solid #e5e7eb;
+    }
+    .kxw-html-table tbody td {
+        padding: 10px 14px;
+        color: #111827;
+        border-bottom: 1px solid #f3f4f6;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+        font-size: 12.5px;
+    }
+    .kxw-html-table tbody tr:last-child td { border-bottom: none; }
+    .kxw-html-table tbody tr:hover { background: #fafbfc; }
+    /* Styled <pre> for heartbeat / watchdog / log content — light theme */
+    pre.kxw-pre {
+        background: #f9fafb !important;
+        border: 1px solid #e5e7eb !important;
+        border-radius: 8px !important;
+        color: #374151 !important;
+        padding: 12px 16px !important;
+        font-size: 12px !important;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace !important;
+        white-space: pre-wrap !important;
+        margin: 0 0 12px 0 !important;
+        overflow-x: auto;
+    }
+    /* Streamlit st.code() override (kept for any leftovers) */
+    [data-testid="stCodeBlock"],
+    [data-testid="stCode"],
+    .stCodeBlock {
+        background: #f9fafb !important;
+        border: 1px solid #e5e7eb !important;
+        border-radius: 8px !important;
+    }
+    [data-testid="stCodeBlock"] pre,
+    [data-testid="stCode"] pre,
+    [data-testid="stCodeBlock"] code,
+    [data-testid="stCode"] code,
+    .stCodeBlock pre, .stCodeBlock code {
+        background: #f9fafb !important;
+        color: #374151 !important;
+    }
+    /* Markdown content inside the report card — scoped via .kxw-report-wrap */
+    .kxw-report-wrap h1 {
+        font-size: 16px !important;
+        font-weight: 600 !important;
+        color: #111827 !important;
+        margin: 0 0 4px 0 !important;
+        padding: 0 !important;
+        border: none !important;
+    }
+    .kxw-report-wrap h2 {
+        font-size: 11px !important;
+        font-weight: 600 !important;
+        color: #6b7280 !important;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        margin: 20px 0 10px 0 !important;
+        padding: 0 0 6px 0 !important;
+        border-bottom: 1px solid #e5e7eb !important;
+    }
+    .kxw-report-wrap h3 {
+        font-size: 13px !important;
+        font-weight: 600 !important;
+        color: #111827 !important;
+        margin: 14px 0 6px 0 !important;
+    }
+    .kxw-report-wrap p, .kxw-report-wrap li {
+        color: #111827 !important;
+        font-size: 13px !important;
+    }
+    .kxw-report-wrap em { color: #6b7280 !important; font-size: 12px; }
+    .kxw-report-wrap table {
+        font-size: 13px !important;
+        border-collapse: collapse;
+        margin: 6px 0 10px 0;
+    }
+    .kxw-report-wrap td, .kxw-report-wrap th {
+        color: #111827 !important;
+        padding: 6px 14px !important;
+        border-bottom: 1px solid #f3f4f6 !important;
+    }
+    .kxw-report-wrap th {
+        font-weight: 600 !important;
+        color: #6b7280 !important;
+        background: #f9fafb !important;
+    }
     /* Empty state */
     .kxw-empty {
         border: 1px dashed #d1d5db;
@@ -572,18 +746,20 @@ st.markdown(
 )
 
 
-# Top bar: clock + refresh — wider columns so neither wraps
-top_l, top_clock, top_btn = st.columns([8, 1.5, 1])
-with top_clock:
-    st.markdown(
-        f"<div class='kxw-clock' style='text-align:center;white-space:nowrap;'>"
-        f"{datetime.now(ET).strftime('%I:%M:%S %p ET')}</div>",
-        unsafe_allow_html=True,
-    )
-with top_btn:
-    if st.button("↻ Refresh", use_container_width=True, type="primary"):
-        st.cache_data.clear()
-        st.rerun()
+# Top bar: clock + refresh — both in the rightmost column, packed tight
+top_l, top_r = st.columns([7, 2])
+with top_r:
+    inner_l, inner_r = st.columns([1.2, 1])
+    with inner_l:
+        st.markdown(
+            f"<div class='kxw-clock' style='text-align:center;white-space:nowrap;"
+            f"margin:2px 0;'>{datetime.now(ET).strftime('%I:%M:%S %p ET')}</div>",
+            unsafe_allow_html=True,
+        )
+    with inner_r:
+        if st.button("↻ Refresh", use_container_width=True, type="primary"):
+            st.cache_data.clear()
+            st.rerun()
 
 # Load data
 health = load_health_status()
@@ -666,45 +842,39 @@ cards_html = (
 )
 st.markdown(cards_html, unsafe_allow_html=True)
 
-# ── Diagnostic button ──
-st.markdown("<div style='margin-top:12px;'></div>", unsafe_allow_html=True)
-diag_cols = st.columns([0.22, 0.78])
-with diag_cols[0]:
+# ── Diagnostic button (centered, status banner below) ──
+st.markdown("<div style='margin-top:16px;'></div>", unsafe_allow_html=True)
+btn_l, btn_c, btn_r = st.columns([1, 1, 1])
+with btn_c:
     diag_clicked = st.button(
         "🔍 Check Bot Status",
         type="primary",
         use_container_width=True,
         help="Runs healthcheck.sh and shows current state.",
     )
-with diag_cols[1]:
-    if diag_clicked:
-        st.cache_data.clear()
-        health = load_health_status()
-        if health["healthy"]:
-            st.markdown(
-                f"<div style='background:#ecfdf5;border:1px solid #a7f3d0;"
-                f"border-radius:8px;padding:12px 16px;color:#065f46;font-size:13px;'>"
-                f"<strong>● BOT HEALTHY</strong> — {health.get('last_cycle_line', '')}"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
-        elif health["summary"] == "DOWN":
-            st.markdown(
-                f"<div style='background:#fef2f2;border:1px solid #fecaca;"
-                f"border-radius:8px;padding:12px 16px;color:#991b1b;font-size:13px;'>"
-                f"<strong>● BOT DOWN</strong> — investigate immediately.<br>"
-                f"<pre style='margin:8px 0 0 0;font-size:11px;color:#7f1d1d;"
-                f"white-space:pre-wrap;'>{health['raw']}</pre></div>",
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                f"<div style='background:#fffbeb;border:1px solid #fde68a;"
-                f"border-radius:8px;padding:12px 16px;color:#92400e;font-size:13px;'>"
-                f"<strong>● STATUS UNCLEAR</strong><br>"
-                f"<pre style='margin:8px 0 0 0;font-size:11px;'>{health['raw']}</pre></div>",
-                unsafe_allow_html=True,
-            )
+if diag_clicked:
+    st.cache_data.clear()
+    health = load_health_status()
+    if health["healthy"]:
+        banner_bg, banner_border, banner_color = "#ecfdf5", "#a7f3d0", "#065f46"
+        banner_title = "● BOT HEALTHY"
+        banner_body = health.get("last_cycle_line", "")
+    elif health["summary"] == "DOWN":
+        banner_bg, banner_border, banner_color = "#fef2f2", "#fecaca", "#991b1b"
+        banner_title = "● BOT DOWN"
+        banner_body = f"<pre style='margin:8px 0 0 0;font-size:11px;color:#7f1d1d;white-space:pre-wrap;'>{health['raw']}</pre>"
+    else:
+        banner_bg, banner_border, banner_color = "#fffbeb", "#fde68a", "#92400e"
+        banner_title = "● STATUS UNCLEAR"
+        banner_body = f"<pre style='margin:8px 0 0 0;font-size:11px;'>{health['raw']}</pre>"
+    st.markdown(
+        f"<div style='background:{banner_bg};border:1px solid {banner_border};"
+        f"border-radius:8px;padding:12px 20px;color:{banner_color};"
+        f"font-size:13px;margin:14px auto 0 auto;max-width:600px;"
+        f"text-align:center;'>"
+        f"<strong>{banner_title}</strong> — {banner_body}</div>",
+        unsafe_allow_html=True,
+    )
 
 # ── Tabs ──
 tab_session, tab_cities, tab_history, tab_system = st.tabs([
@@ -718,18 +888,104 @@ _empty = lambda msg: st.markdown(
     f"<div class='kxw-empty'>{msg}</div>", unsafe_allow_html=True
 )
 
+
+def _render_report_card(report_md: str) -> None:
+    """Render a daily cycle-report markdown as a styled HTML card.
+
+    Strips the duplicate title and auto-gen metadata, converts to HTML
+    via the markdown lib, wraps in our scoped CSS classes. Used for both
+    the Today's Session latest report and the Historical tab past reports.
+    """
+    if not report_md or report_md.strip().startswith("_"):
+        _empty(report_md.strip("_ ") if report_md else "Report empty.")
+        return
+    cleaned_lines = []
+    skip_h1 = True
+    for line in report_md.splitlines():
+        stripped = line.strip()
+        if skip_h1 and stripped.startswith("# "):
+            skip_h1 = False
+            continue
+        if stripped.startswith(("_Sunday", "_Monday", "_Tuesday", "_Wednesday",
+                                "_Thursday", "_Friday", "_Saturday")):
+            continue
+        if "_Last updated:" in stripped or "Auto-generated from" in stripped:
+            continue
+        if stripped == "---":
+            continue
+        cleaned_lines.append(line)
+    cleaned = "\n".join(cleaned_lines).strip()
+    html_body = md_lib.markdown(
+        cleaned, extensions=["tables", "fenced_code", "sane_lists"]
+    )
+    st.markdown(
+        f"<div class='kxw-report-card'><div class='kxw-report-wrap'>"
+        f"{html_body}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _styled_pre(text: str) -> None:
+    """Render text in a styled code-block-like pre, replacing st.code which
+    uses Streamlit's dark theme that we can't override reliably."""
+    if not text or not text.strip():
+        _empty("(empty)")
+        return
+    # Escape HTML special chars
+    escaped = (
+        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+    st.markdown(
+        f"<pre class='kxw-pre'>{escaped}</pre>",
+        unsafe_allow_html=True,
+    )
+
+
+def _html_table(df: pd.DataFrame, *, color_cols: dict[str, str] | None = None) -> None:
+    """Render a dataframe as a styled HTML table. Replaces st.dataframe
+    because that uses canvas (glide-data-grid) which ignores CSS overrides.
+    color_cols: optional {col_name: "pnl"} to apply special coloring."""
+    if df.empty:
+        _empty("No data.")
+        return
+    color_cols = color_cols or {}
+    head = "".join(f"<th>{c}</th>" for c in df.columns)
+    body_rows = []
+    for _, row in df.iterrows():
+        cells = []
+        for col in df.columns:
+            val = row[col]
+            cell_style = ""
+            display = "" if val is None or (isinstance(val, float) and pd.isna(val)) else str(val)
+            if color_cols.get(col) == "pnl":
+                # Highlight positive/negative dollar amounts
+                try:
+                    s = str(val).replace("$", "").replace("+", "")
+                    f = float(s)
+                    if f > 0:
+                        cell_style = "color:#047857;font-weight:600;"
+                    elif f < 0:
+                        cell_style = "color:#b91c1c;font-weight:600;"
+                except Exception:
+                    pass
+            if color_cols.get(col) == "status":
+                if display == "PROFIT":
+                    cell_style = "color:#047857;font-weight:600;"
+                elif display == "UNDERWATER":
+                    cell_style = "color:#b91c1c;font-weight:600;"
+            cells.append(f"<td style='{cell_style}'>{display}</td>")
+        body_rows.append("<tr>" + "".join(cells) + "</tr>")
+    body = "".join(body_rows)
+    st.markdown(
+        f"<table class='kxw-html-table'>"
+        f"<thead><tr>{head}</tr></thead>"
+        f"<tbody>{body}</tbody></table>",
+        unsafe_allow_html=True,
+    )
+
 with tab_session:
     _section("Latest cycle summary")
-    report_md = load_latest_cycle_report()
-    if report_md.strip().startswith("_"):
-        _empty(report_md.strip("_ "))
-    else:
-        # Render markdown natively (parsing happens correctly) and style
-        # the wrapping container via CSS, not raw HTML. Wrapping markdown
-        # in <div>...{report_md}</div> with unsafe_allow_html stops the
-        # markdown parser from rendering tables.
-        with st.container(border=True):
-            st.markdown(report_md)
+    _render_report_card(load_latest_cycle_report())
 
     _section("Open positions")
     if positions_df.empty:
@@ -742,7 +998,7 @@ with tab_session:
         display_df = display_df[
             ["Ticker", "Side", "Entry", "Current Bid", "P&L $", "Engine", "Status"]
         ]
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        _html_table(display_df, color_cols={"P&L $": "pnl", "Status": "status"})
 
     _section("Decision breakdown — today")
     breakdown = load_decision_breakdown_today()
@@ -751,14 +1007,14 @@ with tab_session:
             sorted(breakdown.items(), key=lambda kv: -kv[1]),
             columns=["Decision", "Count"],
         )
-        st.dataframe(b_df, use_container_width=True, hide_index=True, height=240)
+        _html_table(b_df)
     else:
         _empty("No decisions saved yet today.")
 
     _section("Live event feed (last 30)")
     events = load_live_event_feed(30)
     if events:
-        st.code("\n".join(events), language=None)
+        _styled_pre("\n".join(events))
     else:
         _empty("Event log empty for today. Will populate during cycles.")
 
@@ -769,7 +1025,7 @@ with tab_cities:
     if cities_df.empty:
         _empty("No city data yet.")
     else:
-        st.dataframe(cities_df, use_container_width=True, hide_index=True)
+        _html_table(cities_df)
 
 
 with tab_history:
@@ -781,7 +1037,7 @@ with tab_history:
         else:
             for fp in files[:14]:
                 with st.expander(fp.stem, expanded=(fp == files[0])):
-                    st.markdown(fp.read_text())
+                    _render_report_card(fp.read_text())
     else:
         _empty("Reports directory not found.")
 
@@ -790,18 +1046,18 @@ with tab_system:
     _section("Launchd jobs")
     jobs = load_launchd_status()
     if jobs:
-        st.dataframe(pd.DataFrame(jobs), use_container_width=True, hide_index=True)
+        _html_table(pd.DataFrame(jobs))
     else:
         _empty("Could not query launchctl.")
 
     _section("Heartbeat file")
-    st.code(heartbeat["raw"] or "(empty)", language=None)
+    _styled_pre(heartbeat["raw"] or "(empty)")
 
     _section("Watchdog log tail")
     if WATCHDOG_LOG.exists():
         try:
             wd_lines = WATCHDOG_LOG.read_text().splitlines()[-20:]
-            st.code("\n".join(wd_lines) if wd_lines else "(empty)", language=None)
+            _styled_pre("\n".join(wd_lines) if wd_lines else "(empty)")
         except Exception as exc:
             _empty(f"watchdog log read failed: {exc}")
     else:
@@ -819,7 +1075,7 @@ with tab_system:
                 mig_df = pd.DataFrame(
                     mig_rows, columns=["ID", "Applied At (UTC)", "Description"]
                 )
-                st.dataframe(mig_df, use_container_width=True, hide_index=True)
+                _html_table(mig_df)
             else:
                 _empty("No migrations recorded.")
         except Exception as exc:
@@ -851,10 +1107,16 @@ with tab_system:
         _empty(f"ollama check failed: {exc}")
 
 
-# Footer note — explicit about read-only
-st.markdown("---")
-st.caption(
-    "Read-only dashboard. Does not place orders, modify state, or control the bot. "
-    f"DB connection mode: `?mode=ro`. Refresh interval: 15-60s per panel. "
-    f"Rendered at {datetime.now(ET).strftime('%I:%M:%S %p ET')}."
+# ── Footer ──
+st.markdown(
+    f"""
+    <div style='margin-top:48px;padding-top:18px;border-top:1px solid #e5e7eb;
+                color:#9ca3af;font-size:11px;text-align:center;
+                letter-spacing:0.3px;'>
+        Read-only viewing layer · Does not place orders, modify state, or
+        control the bot · DB opened in <span style='color:#6b7280;'>mode=ro</span> ·
+        Rendered at {datetime.now(ET).strftime('%I:%M:%S %p ET')}
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
