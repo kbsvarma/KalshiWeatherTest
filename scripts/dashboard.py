@@ -870,19 +870,39 @@ run_requested = qp.get("run") == "1"
 run_result_msg: str | None = None
 run_result_ok = False
 if run_requested:
-    try:
-        r = subprocess.run(
-            ["launchctl", "kickstart", "-k",
-             f"gui/{os.getuid() if hasattr(os, 'getuid') else 501}/com.varmakammili.kalshi.weather.cycle"],
-            capture_output=True, text=True, timeout=5,
+    # Step 1: don't kickstart if a cycle is already in progress (saves the
+    # user from accidentally killing the running cycle by clicking twice).
+    hb_check = load_heartbeat()
+    in_progress = (
+        hb_check.get("phase") == "cycle_start"
+        and hb_check.get("age_seconds") is not None
+        and hb_check["age_seconds"] < 360
+    )
+    if in_progress:
+        run_result_msg = (
+            f"Cycle already in progress — started "
+            f"{hb_check['age_seconds']}s ago. Refresh in ~2 min."
         )
-        if r.returncode == 0:
-            run_result_msg = "Cycle kicked — will start within a few seconds. Refresh in ~2 min to see results."
-            run_result_ok = True
-        else:
-            run_result_msg = f"launchctl returned {r.returncode}: {(r.stderr or r.stdout or '').strip()[:200]}"
-    except Exception as exc:
-        run_result_msg = f"failed to kick cycle: {exc}"
+        run_result_ok = True  # not an error, just a no-op
+    else:
+        try:
+            # Use kickstart WITHOUT -k. The -k flag means "kill first then
+            # restart" which would SIGTERM any running cycle (exit code -15)
+            # and confuse healthcheck. Plain kickstart simply asks launchd
+            # to fire the job now.
+            uid = os.getuid() if hasattr(os, "getuid") else 501
+            r = subprocess.run(
+                ["launchctl", "kickstart",
+                 f"gui/{uid}/com.varmakammili.kalshi.weather.cycle"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if r.returncode == 0:
+                run_result_msg = "Cycle kicked — will start within a few seconds. Refresh in ~2 min to see results."
+                run_result_ok = True
+            else:
+                run_result_msg = f"launchctl returned {r.returncode}: {(r.stderr or r.stdout or '').strip()[:200]}"
+        except Exception as exc:
+            run_result_msg = f"failed to kick cycle: {exc}"
 
 if diag_active or run_requested:
     # Force-refresh cached health status so the panel reflects current state

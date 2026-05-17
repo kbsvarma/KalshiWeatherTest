@@ -33,8 +33,15 @@ if [[ -z "$cycle_line" ]]; then
   report "✗ CYCLE job NOT LOADED in launchd"
   health=1
 else
+  cycle_pid=$(echo "$cycle_line" | awk '{print $1}')
   cycle_exit=$(echo "$cycle_line" | awk '{print $2}')
-  if [[ "$cycle_exit" != "0" && "$cycle_exit" != "-" ]]; then
+  # When a job is currently running, launchctl shows its PID in col 1
+  # while col 2 still has the PREVIOUS run's exit code. A stale exit code
+  # from a previously-killed run (e.g., -15 from a kickstart -k) does NOT
+  # mean the current run is failing. Treat in-progress as healthy.
+  if [[ "$cycle_pid" != "-" && "$cycle_pid" != "0" && -n "$cycle_pid" ]]; then
+    report "✓ CYCLE in progress (PID $cycle_pid, prev exit=$cycle_exit ignored)"
+  elif [[ "$cycle_exit" != "0" && "$cycle_exit" != "-" ]]; then
     report "✗ CYCLE last exit=$cycle_exit (nonzero — failing)"
     health=1
   else
