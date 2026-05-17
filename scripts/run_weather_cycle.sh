@@ -42,6 +42,16 @@ export LIVE_ORDERS_ENABLED LIVE_ORDERS_DRY_RUN LIVE_DAILY_USD_CAP
 
 ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 
+# Heartbeat — overwritten at cycle start and again at cycle end. Watchdog and
+# healthcheck consume this for an O(1) "is the bot alive?" answer without
+# scanning the multi-MB cron_cycle.log. The file is intentionally small.
+HEARTBEAT_FILE="$LOG_DIR/heartbeat.txt"
+
+write_heartbeat() {
+  printf 'phase=%s\nutc=%s\nhost_pid=%s\n' "$1" "$(ts)" "$$" > "$HEARTBEAT_FILE"
+}
+
+write_heartbeat "cycle_start"
 echo "[$(ts)] ────── cycle start ──────" >> "$LOG_FILE"
 
 # Run city cycle — full output goes to log, with summary at the end
@@ -58,6 +68,7 @@ else
   echo "[$(ts)] ✗ survey_opportunities FAILED (exit=$?)" >> "$LOG_FILE"
 fi
 
+write_heartbeat "cycle_end"
 echo "[$(ts)] ────── cycle end ──────" >> "$LOG_FILE"
 echo "" >> "$LOG_FILE"
 

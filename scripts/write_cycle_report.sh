@@ -104,14 +104,68 @@ fills_in_window=$(sqlite3 "$DB" "SELECT count(*) FROM shadow_fills WHERE fill_ti
 live_in_window=$(sqlite3 "$DB" "SELECT count(*) FROM live_orders WHERE created_at >= '${start_utc%Z}' AND created_at <= '${end_utc%Z}';" 2>/dev/null)
 [[ -z "$live_in_window" ]] && live_in_window=0
 
+# T1.2/T1.3 visibility — query the decisions saved in this cycle window
+# for aggregate stats. Pulled from real DB rows; "—" when no data.
+priors_stats=$(sqlite3 "$DB" "SELECT payload_json FROM decisions WHERE as_of_time >= '${start_utc%Z}' AND as_of_time <= '${end_utc%Z}';" 2>/dev/null \
+  | python3 -c "
+import json, sys, statistics
+clim_hits = pers_hits = pers_inflated = 0
+shrink_deltas = []
+pers_gaps = []
+for line in sys.stdin:
+    line = line.strip()
+    if not line: continue
+    try:
+        d = json.loads(line)
+    except Exception:
+        continue
+    ps = d.get('path_state') or {}
+    if ps.get('p_climatology') is not None:
+        clim_hits += 1
+        try:
+            pre = float(ps.get('p_pre_shrinkage') or 0)
+            post = float(ps.get('p_yes') or 0)
+            shrink_deltas.append(abs(pre - post))
+        except Exception:
+            pass
+    if ps.get('persistence_gap_f') is not None:
+        pers_hits += 1
+        try:
+            g = float(ps.get('persistence_gap_f'))
+            pers_gaps.append(abs(g))
+        except Exception:
+            pass
+        try:
+            if float(ps.get('persistence_uncertainty_addon') or 0) > 0:
+                pers_inflated += 1
+        except Exception:
+            pass
+mean_shrink = round(statistics.mean(shrink_deltas), 4) if shrink_deltas else 0
+max_shrink = round(max(shrink_deltas), 4) if shrink_deltas else 0
+mean_gap = round(statistics.mean(pers_gaps), 2) if pers_gaps else 0
+max_gap = round(max(pers_gaps), 2) if pers_gaps else 0
+print(f'{clim_hits}|{mean_shrink}|{max_shrink}|{pers_hits}|{pers_inflated}|{mean_gap}|{max_gap}')
+" 2>/dev/null || echo "0|0|0|0|0|0|0")
+clim_hits=$(echo "$priors_stats" | cut -d'|' -f1)
+mean_shrink=$(echo "$priors_stats" | cut -d'|' -f2)
+max_shrink=$(echo "$priors_stats" | cut -d'|' -f3)
+pers_hits=$(echo "$priors_stats" | cut -d'|' -f4)
+pers_inflated=$(echo "$priors_stats" | cut -d'|' -f5)
+mean_pers_gap=$(echo "$priors_stats" | cut -d'|' -f6)
+max_pers_gap=$(echo "$priors_stats" | cut -d'|' -f7)
+
 # Build JSON row via python for clean escaping
 python3 - "$start_utc" "$end_utc" "$cycle_status" "$market_count" "$taker_cand" \
               "$taker_zero" "$selected_count" "$rejected_count" \
               "$selected_tickers" "$fills_in_window" "$live_in_window" "$rej_reasons" "$now_iso" \
+              "$clim_hits" "$mean_shrink" "$max_shrink" "$pers_hits" "$pers_inflated" \
+              "$mean_pers_gap" "$max_pers_gap" \
               "$DATA_FILE" <<'PY'
 import json, sys
 (start_utc, end_utc, status, mkt, tc, t0, sel, rej,
- tickers_csv, fills, live, rej_csv, now_iso, data_file) = sys.argv[1:]
+ tickers_csv, fills, live, rej_csv, now_iso,
+ clim_hits, mean_shrink, max_shrink, pers_hits, pers_inflated, mean_pers_gap, max_pers_gap,
+ data_file) = sys.argv[1:]
 
 tickers = [t for t in tickers_csv.split(",") if t]
 rej_pairs = []
@@ -122,6 +176,10 @@ for chunk in rej_csv.split("|"):
             rej_pairs.append({"reason": name, "count": int(n)})
         except ValueError:
             pass
+
+def _f(s):
+    try: return float(s)
+    except Exception: return 0.0
 
 row = {
     "status": status,
@@ -137,6 +195,15 @@ row = {
     "shadow_fills_in_window": int(fills),
     "live_orders_in_window": int(live),
     "top_rejection_reasons": rej_pairs,
+    # T1.2 climatology shrinkage observability
+    "climatology_hit_count": int(clim_hits),
+    "climatology_mean_shrink_delta": _f(mean_shrink),
+    "climatology_max_shrink_delta": _f(max_shrink),
+    # T1.3 persistence observability
+    "persistence_hit_count": int(pers_hits),
+    "persistence_inflation_triggered_count": int(pers_inflated),
+    "persistence_mean_abs_gap_f": _f(mean_pers_gap),
+    "persistence_max_abs_gap_f": _f(max_pers_gap),
 }
 with open(data_file, "a") as f:
     f.write(json.dumps(row) + "\n")

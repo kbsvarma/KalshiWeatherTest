@@ -55,6 +55,21 @@ if [[ "$slot_ran" == "yes" ]]; then
     rm -f "$FLAG" "$FLAG.notified" 2>/dev/null
     echo "[$(ts)] RECOVERED (slot $slot_et ran)" >> "$WATCH_LOG"
   fi
+  # Sanity check the heartbeat — if it shows cycle_start but the most recent
+  # cycle_end in the log is older than the heartbeat, the wrapper may be
+  # hung. We still report this since it's a real failure mode.
+  HEARTBEAT="$ROOT/logs/heartbeat.txt"
+  if [[ -f "$HEARTBEAT" ]] && grep -q "phase=cycle_start" "$HEARTBEAT" 2>/dev/null; then
+    hb_mtime=$(stat -f "%m" "$HEARTBEAT" 2>/dev/null || echo 0)
+    now_epoch=$(date "+%s")
+    age_sec=$(( now_epoch - hb_mtime ))
+    # cycle ought to take <240s; if we see cycle_start older than 300s
+    # without a cycle_end, that's a hung cycle.
+    if (( age_sec > 300 )); then
+      "$REPORTER" "FAILED" "$slot_et" "stuck_cycle_start_age=${age_sec}s_heartbeat=$(cat $HEARTBEAT | tr '\n' ' ')" 2>>"$WATCH_LOG" || true
+      echo "[$(ts)] WARN: heartbeat shows cycle_start ${age_sec}s ago, no end" >> "$WATCH_LOG"
+    fi
+  fi
   exit 0
 fi
 

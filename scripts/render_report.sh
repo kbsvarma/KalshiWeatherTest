@@ -135,6 +135,41 @@ out.append(f"| **Open contracts on Kalshi** | {open_pos} |")
 out.append("")
 out.append("---")
 out.append("")
+out.append("## Scientific Priors (T1.2 + T1.3)")
+out.append("")
+clim_total = sum(int(r.get("climatology_hit_count") or 0) for r in rows)
+clim_max_shrink = max(
+    (float(r.get("climatology_max_shrink_delta") or 0) for r in rows),
+    default=0.0,
+)
+pers_total = sum(int(r.get("persistence_hit_count") or 0) for r in rows)
+pers_inflated_total = sum(
+    int(r.get("persistence_inflation_triggered_count") or 0) for r in rows
+)
+pers_max_gap = max(
+    (float(r.get("persistence_max_abs_gap_f") or 0) for r in rows),
+    default=0.0,
+)
+out.append(f"| | |")
+out.append(f"|:--|:--|")
+out.append(
+    f"| **Climatology cache hits (markets w/ prior applied)** | {clim_total:,} |"
+)
+out.append(
+    f"| **Largest model→prior shrinkage today** | {clim_max_shrink:.3f} prob units |"
+)
+out.append(
+    f"| **Persistence (yesterday's high) hits** | {pers_total:,} |"
+)
+out.append(
+    f"| **Persistence-triggered uncertainty inflations** | {pers_inflated_total} |"
+)
+out.append(
+    f"| **Largest persistence gap today** | {pers_max_gap:.1f}°F |"
+)
+out.append("")
+out.append("---")
+out.append("")
 out.append("## Cycle Log")
 out.append("")
 
