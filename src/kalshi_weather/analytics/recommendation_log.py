@@ -26,9 +26,13 @@ from kalshi_weather.storage.state_store import SQLiteStateStore
 
 
 # Match the volume-grinder gates so we can classify each decision.
+# 2026-05-18 PM: aligned with the operational values in
+# engines/shadow.py and analytics/volume_selection.py after the bug audit
+# found three-way drift. Same logical concept, three different numbers.
+# Keep these in sync — see notes/volume_grinder_thresholds.md.
 _FAVORITE_MIN_P = Decimal("0.70")
 _FAVORITE_MAX_P = Decimal("0.97")
-_MAX_SPREAD_F = Decimal("8.0")
+_MAX_SPREAD_F = Decimal("10.0")          # was 8.0 — drifted from shadow=10
 _MIN_EXEC_EV = Decimal("0.005")
 _MIN_TRADABILITY = Decimal("0.55")
 _MAX_MARKET_DISAGREEMENT = Decimal("0.30")  # surface as REVIEW above this

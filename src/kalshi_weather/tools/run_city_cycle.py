@@ -24,11 +24,25 @@ from kalshi_weather.engines.afd_extractor import extract_afd_signals_cached
 # A hung HTTP call or a single city raising an unhandled exception used to
 # kill the entire cycle. With these limits each city is isolated and the
 # cycle has a hard ceiling so it can never overlap the next scheduled slot.
-MAX_CYCLE_SECONDS = 360  # 6 min — raised 2026-05-17 after KXLOW activation
-                          # doubled markets from 108 to ~456. Was 240; cycles
-                          # were hitting 311s. Real fix is parallelization
-                          # (see notes/scientific_roadmap.md T3.8), this
-                          # raised ceiling buys time without that refactor.
+MAX_CYCLE_SECONDS = 900  # 15 min — raised 2026-05-18 PM (third time)
+                          # after cycles consistently ran 10-11+ min during
+                          # the 1 PM ET range. The 600s ceiling kept firing
+                          # SIGALRM on cycles that legitimately needed 10:11.
+                          # Slowdown appears persistent (Open-Meteo retries
+                          # + 20 cities × 11 series including MAY 19 lookahead
+                          # = roughly double the per-city HTTP load vs earlier).
+                          # 15 min ceiling matches the 15-min slot cadence —
+                          # cycles will use the FULL slot but won't bleed into
+                          # the next. Lock TTL bumped to 960s. If the next
+                          # slot's launchd fires while this one is still
+                          # running, the lock causes the new cycle to no-op
+                          # which is the right behavior.
+                          # Original history:
+                          #   2026-05-16: 240 (pre-KXLOW)
+                          #   2026-05-17: 360 (post-KXLOW)
+                          #   2026-05-18 AM: 480 (drift)
+                          #   2026-05-18 PM-early: 600 (rate-limit retries)
+                          #   2026-05-18 PM-mid:   900 (persistent slowdown)
                           # Note: Python's SIGALRM can be swallowed by C-level
                           # blocking HTTP calls, so this ceiling is best-effort
                           # — the watchdog's stuck-cycle SIGKILL is the
@@ -56,6 +70,7 @@ def _maybe_close_if_underwater(
     market_ticker: str,
     orderbook,
     city_id: str,
+    p_model_at_close=None,
 ) -> None:
     """If we own this market and selling now would be a loss, close.
 
@@ -63,6 +78,12 @@ def _maybe_close_if_underwater(
     the most recent PLACED live order for the ticker, computes pnl vs
     the top opposite-side bid, and if pnl < 0 places a sell IOC. We do
     NOT close profitable positions on EXIT signals (let them ride).
+
+    p_model_at_close: optional Decimal — the model's probability for the
+    held side at the moment of close. Forwarded to maybe_close_position
+    so the CLOSED row's payload carries ``exit_metadata.p_model_at_close``,
+    which the re-entry policy needs later in the day to compare against
+    a new signal.
     """
     import json as _json
     from decimal import Decimal as _D
@@ -131,6 +152,8 @@ def _maybe_close_if_underwater(
         side_held=side_held,
         entry_price_cents=entry_price_cents,
         current_sell_bid_cents=best_bid_cents,
+        p_model_at_close=p_model_at_close,
+        close_reason="underwater_exit_signal",
     )
     if res.placed:
         print(f"[EXIT-EXEC] ✓ CLOSED {market_ticker} {side_held} "
@@ -627,11 +650,23 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
         # (let the position ride — current policy, can revisit).
         if result.explanation.final_decision.value == "EXIT":
             try:
+                # The selected_edge carries the model's current probability
+                # for the side we're closing. Forward it so the CLOSED row
+                # records p_model_at_close — needed by the re-entry policy
+                # later in the day to decide whether a re-buy is justified.
+                _p_model_at_close = None
+                if result.selected_edge is not None:
+                    try:
+                        from decimal import Decimal as _D
+                        _p_model_at_close = _D(str(result.selected_edge.p_model))
+                    except Exception:
+                        _p_model_at_close = None
                 _maybe_close_if_underwater(
                     state_store=state_store,
                     market_ticker=market_snapshot.market_ticker,
                     orderbook=orderbook,
                     city_id=city_profile.city_id,
+                    p_model_at_close=_p_model_at_close,
                 )
             except Exception as exc:  # noqa: BLE001
                 print(f"[EXIT-EXEC] WARN: exit check failed for "

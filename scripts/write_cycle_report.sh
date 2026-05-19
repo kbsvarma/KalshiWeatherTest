@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # Per-cycle reporting — two-stage design.
 #
 #   STAGE 1 (this script): append a structured row to a JSONL data file.
@@ -17,7 +17,7 @@
 
 set -uo pipefail
 
-ROOT="/Users/varmakammili/Documents/GitHub/KalshiWeatherTest"
+ROOT="${KALSHI_WEATHER_ROOT:-/Users/varmakammili/Documents/GitHub/KalshiWeatherTest}"
 LOG="$ROOT/logs/cron_cycle.log"
 DB="$ROOT/data/state/runtime.sqlite3"
 
@@ -49,8 +49,10 @@ fi
 
 # ── OK mode: parse the most recent cycle from cron_cycle.log ──
 
-last_start_line=$(grep -n "cycle start" "$LOG" | tail -1)
-last_end_line=$(grep -n "cycle end" "$LOG" | tail -1)
+# Literal markers — must NOT match "cycle ended" in skip-log lines.
+# Same bug class as the 2026-05-18 PM cooldown regression.
+last_start_line=$(grep -nF "────── cycle start ──────" "$LOG" | tail -1)
+last_end_line=$(grep -nF "────── cycle end ──────" "$LOG" | tail -1)
 
 if [[ -z "$last_start_line" || -z "$last_end_line" ]]; then
   printf '{"status":"REPORT_ERROR","slot":"unknown","recorded_at_utc":"%s","reason":"no cycle markers in log"}\n' \
@@ -101,7 +103,10 @@ rej_reasons=$(grep -oE '"rejection_reason": *"[^"]+"' "$section_tmp" \
 # DB-side counts during cycle window
 fills_in_window=$(sqlite3 "$DB" "SELECT count(*) FROM shadow_fills WHERE fill_time >= '${start_utc%Z}' AND fill_time <= '${end_utc%Z}';" 2>/dev/null)
 [[ -z "$fills_in_window" ]] && fills_in_window=0
-live_in_window=$(sqlite3 "$DB" "SELECT count(*) FROM live_orders WHERE created_at >= '${start_utc%Z}' AND created_at <= '${end_utc%Z}';" 2>/dev/null)
+# Count only REAL placed orders — exclude BLOCKED / DRY_RUN / ERROR rows
+# that share the live_orders table. Bug audit 2026-05-18 PM found this
+# was inflating the "live orders this cycle" metric in the daily report.
+live_in_window=$(sqlite3 "$DB" "SELECT count(*) FROM live_orders WHERE created_at >= '${start_utc%Z}' AND created_at <= '${end_utc%Z}' AND status LIKE 'PLACED_%';" 2>/dev/null)
 [[ -z "$live_in_window" ]] && live_in_window=0
 
 # T1.2/T1.3 visibility — query the decisions saved in this cycle window

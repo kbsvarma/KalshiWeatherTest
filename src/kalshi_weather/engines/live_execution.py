@@ -50,12 +50,44 @@ class LiveExecutionResult:
 
 # Hard limits (cannot be overridden by env without code review).
 MAX_CONTRACTS_PER_MARKET = 1
-DEFAULT_DAILY_USD_CAP = 10.0
+# 2026-05-18 PM: aligned default from 10 → 15 to match LIVE_DAILY_USD_CAP in
+# run_weather_cycle.sh and analytics.volume_selection.daily_capital_cap_usd.
+# The default only kicks in if the env var is unset; in normal operation
+# the env var ($15) wins. Keeping the default consistent so that someone
+# running a Python tool outside the wrapper sees the same cap.
+DEFAULT_DAILY_USD_CAP = 15.0
 MIN_REMAINING_BALANCE_USD = 1.0
 # Refuse to place live orders on any market settling more than this many days
 # out. Current Kalshi behaviour is "today + tomorrow only" so this is a
 # defensive guard against future Kalshi listing changes.
 MAX_SETTLEMENT_DAYS_AHEAD = 2
+
+# ── Re-entry policy ──────────────────────────────────────────────────────
+# When we CLOSE a position (loss-cut or exit signal), we don't want to
+# re-bet that exact ticker the same day on weak signals — that's
+# ping-pong, racks up fees, and is usually noise. But sometimes the
+# model has new information after close that strongly supports the
+# original direction. The re-entry policy threads that needle.
+#
+# A market is allowed to be re-bet on the same day only when ALL of:
+#   1. Cooldown elapsed since CLOSE  → REENTRY_MIN_COOLDOWN_MINUTES
+#   2. New p_model exceeds at-exit p_model by REENTRY_P_MODEL_BOOST_REQUIRED
+#   3. We haven't already used our daily re-entry budget for this ticker
+#      (REENTRY_MAX_PER_TICKER_PER_DAY)
+#   4. Exit metadata (p_model_at_close) was recorded — legacy CLOSE rows
+#      without metadata are treated as "strong conviction exit" → blocked
+#      (conservative default)
+#
+# Bug-class context: replaces the older _market_already_traded_today() gate
+# which was binary (ANY same-day touch → block). That gate was correct as
+# a starting policy but missed the case where the bot exited at the WRONG
+# moment and refused to re-enter even when the model strongly disagreed
+# with the exit. Today (2026-05-18) MIA-B86.5 close at 1:01 AM ET blocked
+# a re-entry at 2:58 PM ET where p_model had risen to 0.94 — likely a
+# legitimate signal we missed.
+REENTRY_MIN_COOLDOWN_MINUTES = 60
+REENTRY_P_MODEL_BOOST_REQUIRED = Decimal("0.10")
+REENTRY_MAX_PER_TICKER_PER_DAY = 1
 
 
 def _market_settlement_date_from_ticker(market_ticker: str):
@@ -117,13 +149,30 @@ def _check_kill_switch(store: SQLiteStateStore) -> bool:
 
 
 def _daily_live_spend(store: SQLiteStateStore) -> float:
-    """Sum the cost of all live orders we've placed today (UTC)."""
+    """Sum the cost of all REAL live orders placed today (UTC).
+
+    2026-05-18 fix: the original implementation read ``p.get("price")`` —
+    but the payload schema only stores ``yes_price`` / ``no_price`` (no
+    plain ``price`` field). As a result ``today_spend`` always evaluated
+    to $0.00 and the daily-cap gate in ``determine_live_execution`` was
+    silently non-functional. We were safe by luck (organic daily spend
+    stayed below the cap), but the gate wasn't guarding anything.
+
+    Correct cost-per-contract is the price of the SIDE we bought:
+      * side == "yes"  →  yes_price (cents)
+      * side == "no"   →  no_price  (cents)
+
+    We also now filter to status LIKE 'PLACED_%' so DRY_RUN_PREVIEW and
+    ERROR rows don't pollute the tally — same convention used by
+    ``_market_already_traded_today`` and the dashboard's account snapshot.
+    """
     today = datetime.now(timezone.utc).date().isoformat()
     try:
         with store._connect() as conn:
             rows = conn.execute(
                 "SELECT payload_json FROM live_orders "
-                "WHERE substr(created_at, 1, 10) = ?",
+                "WHERE substr(created_at, 1, 10) = ? "
+                "  AND status LIKE 'PLACED_%'",
                 (today,),
             ).fetchall()
     except Exception:
@@ -132,35 +181,167 @@ def _daily_live_spend(store: SQLiteStateStore) -> float:
     for (raw,) in rows:
         try:
             p = json.loads(raw or "{}")
-            # Cost = price_cents/100 * count
             count = int(p.get("count") or 0)
-            price = int(p.get("price") or 0)
+            side = (p.get("side") or "").lower()
+            if side == "yes":
+                price = int(p.get("yes_price") or 0)
+            elif side == "no":
+                price = int(p.get("no_price") or 0)
+            else:
+                # Defensive fallback — try yes_price then no_price then 0.
+                price = int(p.get("yes_price") or p.get("no_price") or 0)
             total += (price / 100.0) * count
         except Exception:
             continue
     return total
 
 
-def _market_already_traded_today(store: SQLiteStateStore, market_ticker: str) -> bool:
-    """Has a REAL Kalshi order been placed for this market today?
+@dataclass(frozen=True, slots=True)
+class ReentryDecision:
+    """Outcome of the same-day re-entry check.
 
-    Filters out DRY_RUN_PREVIEW and ERROR rows — dedup is about real exposure,
-    not about what we considered. (2026-05-17 bug: dry-run pollution from
-    a manual test blocked the next real cycle from firing the same edge.)
+    block_reason
+        ``None`` → market may be (re-)entered; else a short snake_case
+        reason suitable for ``blocker_reason``.
+    is_reentry
+        ``True`` when the new bet is a same-day re-entry after a prior
+        close (informational: caller tags the new PLACED row so the
+        daily re-entry cap counts it). ``False`` when this is the
+        first touch today or when blocked.
+    """
+    block_reason: str | None
+    is_reentry: bool
+
+
+def _check_reentry_policy(
+    store: SQLiteStateStore,
+    market_ticker: str,
+    *,
+    current_p_model: Decimal,
+) -> ReentryDecision:
+    """Return a ``ReentryDecision`` describing whether re-entry is allowed.
+
+    block_reason is ``None`` when the market may be (re-)entered today,
+    else a snake_case reason suitable for ``blocker_reason``.
+
+    Replaces the older binary ``_market_already_traded_today`` gate. The
+    new policy threads four conditions; failing any one returns a
+    descriptive reason naming the failure mode so daily reports can
+    distinguish "re-entry signal weak" from "ticker already held" from
+    "in cooldown."
+
+    Semantics:
+
+      * **No same-day rows (excluding DRY_RUN_*/ERROR)** → allow.
+      * **PLACED_* row without a matching CLOSED_* on the same day** →
+        block. The position is currently held — this isn't a re-entry
+        case, it's a duplicate-bet case, handled the same as before.
+      * **PLACED_* + CLOSED_* on the same day** → re-entry candidate.
+        Evaluate cooldown + signal-boost + daily-cap; allow only if all
+        pass. Legacy CLOSED_* rows lacking ``exit_metadata.p_model_at_close``
+        are treated as strong-conviction exits → blocked (conservative
+        default for rows recorded before this policy shipped).
     """
     today = datetime.now(timezone.utc).date().isoformat()
     try:
         with store._connect() as conn:
-            row = conn.execute(
-                "SELECT count(*) FROM live_orders "
+            rows = conn.execute(
+                "SELECT created_at, status, payload_json FROM live_orders "
                 "WHERE market_ticker = ? "
                 "AND substr(created_at, 1, 10) = ? "
-                "AND status NOT IN ('DRY_RUN_PREVIEW', 'ERROR')",
+                "AND status NOT IN ('DRY_RUN_PREVIEW', 'ERROR', 'DRY_RUN', 'DRY_RUN_CLOSE_PREVIEW') "
+                "ORDER BY created_at",
                 (market_ticker, today),
-            ).fetchone()
-        return bool(row and int(row[0]) > 0)
+            ).fetchall()
     except Exception:
-        return False
+        # If we can't reach the DB, fail closed — don't risk a duplicate bet.
+        return ReentryDecision("reentry_check_db_unavailable", False)
+
+    if not rows:
+        return ReentryDecision(None, False)  # First touch today — allow.
+
+    # Categorize the same-day rows.
+    placed_rows: list[tuple[str, dict[str, Any]]] = []
+    closed_rows: list[tuple[str, dict[str, Any]]] = []
+    reentry_rows: list[tuple[str, dict[str, Any]]] = []
+    for created_at, status, payload_raw in rows:
+        try:
+            payload = json.loads(payload_raw or "{}")
+        except Exception:
+            payload = {}
+        if status.startswith("PLACED_"):
+            if payload.get("is_reentry"):
+                reentry_rows.append((created_at, payload))
+            else:
+                placed_rows.append((created_at, payload))
+        elif status.startswith("CLOSED_"):
+            closed_rows.append((created_at, payload))
+        elif status.startswith("CLOSE_"):
+            # CLOSE_ERROR — close attempt that failed at the exchange. Be
+            # conservative: don't allow re-entry on top of an unknown exit
+            # state, the existing position may still be open.
+            return ReentryDecision("reentry_blocked_after_close_error", False)
+
+    # If the most recent thing we did wasn't a close, we still hold the
+    # position. Block (duplicate-bet case).
+    if not closed_rows:
+        return ReentryDecision("market_already_held_today", False)
+    last_placed_at = max((ts for ts, _ in placed_rows + reentry_rows), default="")
+    last_closed_at = max(ts for ts, _ in closed_rows)
+    if last_placed_at > last_closed_at:
+        # PLACED after CLOSED → currently held.
+        return ReentryDecision("market_already_held_today", False)
+
+    # Re-entry gate: most recent action was a CLOSE. Check the three
+    # re-entry conditions. We're in a re-entry SITUATION; whether it's
+    # allowed is what the checks below decide.
+
+    # (1) Daily re-entry cap — already used the budget?
+    if len(reentry_rows) >= REENTRY_MAX_PER_TICKER_PER_DAY:
+        return ReentryDecision(
+            f"reentry_cap_reached ({len(reentry_rows)}/{REENTRY_MAX_PER_TICKER_PER_DAY})",
+            True,
+        )
+
+    # (2) Cooldown since most recent close.
+    try:
+        close_dt = datetime.fromisoformat(last_closed_at.replace("Z", "+00:00"))
+        if close_dt.tzinfo is None:
+            close_dt = close_dt.replace(tzinfo=timezone.utc)
+        minutes_since_close = (
+            (datetime.now(timezone.utc) - close_dt).total_seconds() / 60.0
+        )
+    except Exception:
+        return ReentryDecision("reentry_close_timestamp_unparseable", True)
+    if minutes_since_close < REENTRY_MIN_COOLDOWN_MINUTES:
+        return ReentryDecision(
+            f"reentry_cooldown ({minutes_since_close:.0f}min "
+            f"< {REENTRY_MIN_COOLDOWN_MINUTES}min)",
+            True,
+        )
+
+    # (3) Signal-boost requirement: new p_model must exceed at-exit p_model
+    #     by at least REENTRY_P_MODEL_BOOST_REQUIRED. Legacy CLOSE rows
+    #     without metadata fail this check (conservative default).
+    last_close_payload = max(closed_rows, key=lambda x: x[0])[1]
+    exit_meta = last_close_payload.get("exit_metadata") or {}
+    exit_p_model_raw = exit_meta.get("p_model_at_close")
+    if exit_p_model_raw is None:
+        return ReentryDecision("reentry_blocked_legacy_close_no_metadata", True)
+    try:
+        exit_p_model = Decimal(str(exit_p_model_raw))
+    except Exception:
+        return ReentryDecision("reentry_exit_p_model_unparseable", True)
+    boost = current_p_model - exit_p_model
+    if boost < REENTRY_P_MODEL_BOOST_REQUIRED:
+        return ReentryDecision(
+            f"reentry_signal_too_weak (boost={boost:.3f} "
+            f"< {REENTRY_P_MODEL_BOOST_REQUIRED})",
+            True,
+        )
+
+    # All checks passed — allow this re-entry.
+    return ReentryDecision(None, True)
 
 
 def _record_live_order(
@@ -194,6 +375,8 @@ def maybe_close_position(
     side_held: str,
     entry_price_cents: int,
     current_sell_bid_cents: int,
+    p_model_at_close: Decimal | None = None,
+    close_reason: str = "unspecified",
 ) -> LiveExecutionResult:
     """Close an open position by submitting a sell IOC order.
 
@@ -204,6 +387,13 @@ def maybe_close_position(
 
     side_held: 'yes' or 'no' — what we're holding.
     entry_price_cents / current_sell_bid_cents: in cents (1..99).
+    p_model_at_close: the model's probability for the held side at the
+        moment we decided to close. Written into the CLOSED row's
+        ``payload_json.exit_metadata`` so the re-entry policy can later
+        compare against a new signal. ``None`` is recorded as missing
+        metadata, which the policy treats as a strong-conviction exit.
+    close_reason: short tag for the close motive, e.g.
+        ``underwater_exit_signal`` or ``manual``.
     """
     if not _live_orders_enabled():
         return LiveExecutionResult(
@@ -240,12 +430,22 @@ def maybe_close_position(
         "count": 1,
         "time_in_force": "immediate_or_cancel",
     }
+    # exit_metadata travels with every CLOSE row (real, dry-run, error).
+    # The re-entry policy reads p_model_at_close from here. Storing it on
+    # ALL close rows (not just successful ones) keeps the policy correct
+    # even when the close itself partially fails.
+    exit_metadata = {
+        "p_model_at_close": str(p_model_at_close) if p_model_at_close is not None else None,
+        "side_held_at_close": side_held,
+        "close_reason": close_reason,
+    }
 
     if _is_dry_run():
         _record_live_order(
             store, market_ticker=market_ticker,
             payload={**order_payload, "close_intent": True,
-                     "entry_price_cents": entry_price_cents},
+                     "entry_price_cents": entry_price_cents,
+                     "exit_metadata": exit_metadata},
             status="DRY_RUN_CLOSE_PREVIEW",
         )
         return LiveExecutionResult(
@@ -263,6 +463,7 @@ def maybe_close_position(
             store, market_ticker=market_ticker,
             payload={**order_payload, "close_intent": True,
                      "entry_price_cents": entry_price_cents,
+                     "exit_metadata": exit_metadata,
                      "error": error_text},
             status="CLOSE_ERROR",
         )
@@ -278,6 +479,7 @@ def maybe_close_position(
         store, market_ticker=market_ticker,
         payload={**order_payload, "close_intent": True,
                  "entry_price_cents": entry_price_cents,
+                 "exit_metadata": exit_metadata,
                  "kalshi_order_id": order.get("order_id") if isinstance(order, dict) else None,
                  "kalshi_status": order_status, "response": resp},
         status=f"CLOSED_{order_status.upper()}",
@@ -340,13 +542,25 @@ def maybe_place_live_order(
             quantity=None, response=None,
         )
 
-    # Gate 3: duplicate-market check
-    if _market_already_traded_today(store, explanation.market_ticker):
+    # Gate 3: duplicate-market / re-entry policy. Replaces the old binary
+    # "already traded today → block" with the conditional re-entry policy
+    # documented at REENTRY_* constants. Allows re-bet when the model has
+    # genuinely new conviction after an earlier close.
+    reentry = _check_reentry_policy(
+        store,
+        explanation.market_ticker,
+        current_p_model=Decimal(str(edge.p_model)),
+    )
+    if reentry.block_reason is not None:
         return LiveExecutionResult(
             placed=False, dry_run=False, order_id=None,
-            blocker_reason="market_already_traded_today", price_cents=None,
+            blocker_reason=reentry.block_reason, price_cents=None,
             quantity=None, response=None,
         )
+    # ``reentry.is_reentry`` is True iff this is a same-day re-entry after
+    # close (passes through to the PLACED row tag below so the next-cycle
+    # re-entry-cap check counts it).
+    is_reentry = reentry.is_reentry
 
     # Gate 4: daily cap
     today_spend = _daily_live_spend(store)
@@ -445,6 +659,10 @@ def maybe_place_live_order(
             "kalshi_order_id": order.get("order_id") if isinstance(order, dict) else None,
             "kalshi_status": order_status,
             "response": resp,
+            # is_reentry: True iff this is a same-day re-buy of a market
+            # we closed earlier today. Counted by the re-entry cap on
+            # the NEXT evaluation of this ticker.
+            "is_reentry": is_reentry,
         },
         status=f"PLACED_{order_status.upper()}",
     )

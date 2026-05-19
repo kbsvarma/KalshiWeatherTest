@@ -1,0 +1,14 @@
+[Unit]
+Description=Trigger Kalshi Weather settlement ingest daily ~12:30 UTC
+Requires=kalshi-weather-settlements.service
+
+[Timer]
+# 12:30 UTC = 8:30 AM EDT / 7:30 AM EST. NWS CLI reports are usually
+# published by 5–11 AM ET; firing at 12:30 UTC ensures we catch all of
+# the previous calendar day's settlements with margin.
+OnCalendar=*-*-* 12:30:00 UTC
+Persistent=true
+Unit=kalshi-weather-settlements.service
+
+[Install]
+WantedBy=timers.target

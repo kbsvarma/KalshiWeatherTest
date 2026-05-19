@@ -1,10 +1,10 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # Bot liveness check. Run this BEFORE answering any "is the bot ok" question.
 # Exits 0 if healthy, 1 if down.
 #
 # Healthy means:
-#   - Both launchd jobs are loaded
-#   - Most recent launchd exit code is 0 (not 127, not anything else)
+#   - Cycle and settlements jobs are loaded (launchd on macOS, systemd on Linux)
+#   - Most recent exit code is 0
 #   - Last "cycle end" in cron_cycle.log is < 35 minutes ago
 #
 # Usage:
@@ -13,10 +13,13 @@
 
 set -uo pipefail
 
-ROOT="/Users/varmakammili/Documents/GitHub/KalshiWeatherTest"
+ROOT="${KALSHI_WEATHER_ROOT:-/Users/varmakammili/Documents/GitHub/KalshiWeatherTest}"
 LOG="$ROOT/logs/cron_cycle.log"
 STDERR_CYCLE="$ROOT/logs/launchd_cycle.stderr.log"
 STDERR_SETTLE="$ROOT/logs/launchd_settlements.stderr.log"
+
+# shellcheck source=lib/portable.sh
+source "$ROOT/scripts/lib/portable.sh"
 
 QUIET=0
 [[ "${1:-}" == "--quiet" ]] && QUIET=1
@@ -24,13 +27,39 @@ QUIET=0
 health=0
 report() { (( QUIET )) || echo "$@"; }
 
-# 1. launchd jobs loaded?
-# Use grep -E with anchored end-of-line so cycle doesn't match cycle.backup too.
-cycle_line=$(launchctl list 2>/dev/null | grep -E 'com\.varmakammili\.kalshi\.weather\.cycle$' || true)
-settle_line=$(launchctl list 2>/dev/null | grep com.varmakammili.kalshi.weather.settlements || true)
+# 1. Cycle + settlements jobs loaded? (launchd on Darwin, systemd on Linux.)
+if _is_darwin; then
+  # Use grep -E with anchored end-of-line so cycle doesn't match cycle.backup too.
+  cycle_line=$(launchctl list 2>/dev/null | grep -E 'com\.varmakammili\.kalshi\.weather\.cycle$' || true)
+  settle_line=$(launchctl list 2>/dev/null | grep com.varmakammili.kalshi.weather.settlements || true)
+else
+  # systemd: synthesize the same "PID exitcode label" shape so the parsing
+  # below works unchanged. Active+running with a PID → "PID 0 unit". Failed
+  # → "- ExecMainStatus unit". Inactive → "" (empty, treated as not loaded).
+  _systemd_line() {
+    local unit="$1"
+    if ! systemctl list-unit-files 2>/dev/null | grep -q "^$unit"; then
+      echo ""
+      return
+    fi
+    local active main_pid exit_status
+    active=$(systemctl is-active "$unit" 2>/dev/null)
+    main_pid=$(systemctl show -p MainPID --value "$unit" 2>/dev/null)
+    exit_status=$(systemctl show -p ExecMainStatus --value "$unit" 2>/dev/null)
+    if [[ "$active" == "active" && -n "$main_pid" && "$main_pid" != "0" ]]; then
+      echo "$main_pid 0 $unit"
+    else
+      echo "- ${exit_status:-0} $unit"
+    fi
+  }
+  cycle_line=$(_systemd_line kalshi-weather-cycle.service)
+  [[ -z "$cycle_line" ]] && cycle_line=$(_systemd_line kxw-cycle.service)
+  settle_line=$(_systemd_line kalshi-weather-settlements.service)
+  [[ -z "$settle_line" ]] && settle_line=$(_systemd_line kxw-settlements.service)
+fi
 
 if [[ -z "$cycle_line" ]]; then
-  report "✗ CYCLE job NOT LOADED in launchd"
+  report "✗ CYCLE job NOT LOADED (launchd on macOS / systemd on Linux)"
   health=1
 else
   cycle_pid=$(echo "$cycle_line" | awk '{print $1}')
@@ -63,17 +92,19 @@ else
 fi
 
 # 2. Last cycle_end timestamp
-last_end=$(grep "cycle end" "$LOG" 2>/dev/null | tail -1 | awk -F'[][]' '{print $2}')
+# Use the literal marker so we don't match "cycle ended" in skip log lines.
+# Bug class fixed 2026-05-18 PM (same pattern as the cooldown regression).
+last_end=$(grep -F "────── cycle end ──────" "$LOG" 2>/dev/null | tail -1 | awk -F'[][]' '{print $2}')
 if [[ -z "$last_end" ]]; then
   report "✗ No 'cycle end' found in $LOG — bot has never completed a cycle"
   health=1
 else
   # Convert "2026-05-17T11:05:09Z" to epoch
-  last_epoch=$(date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$last_end" "+%s" 2>/dev/null)
+  last_epoch=$(_iso_to_epoch "$last_end")
   now_epoch=$(date -u "+%s")
   age_min=$(( (now_epoch - last_epoch) / 60 ))
   # Convert to ET for display
-  last_et=$(TZ="America/New_York" date -j -f "%s" "$last_epoch" "+%I:%M:%S %p ET")
+  last_et=$(_epoch_to_et_display "$last_epoch" "+%I:%M:%S %p ET")
   if (( age_min > 35 )); then
     report "✗ LAST CYCLE: $last_et — $age_min min ago (>35 min = DOWN)"
     health=1
@@ -85,7 +116,7 @@ fi
 # 3. Recent stderr noise
 for f in "$STDERR_CYCLE" "$STDERR_SETTLE"; do
   if [[ -f "$f" ]]; then
-    mtime_epoch=$(stat -f "%m" "$f")
+    mtime_epoch=$(_file_mtime "$f")
     now_epoch=$(date -u "+%s")
     age_min=$(( (now_epoch - mtime_epoch) / 60 ))
     if (( age_min < 60 )); then

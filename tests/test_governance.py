@@ -209,10 +209,11 @@ class QualificationGovernanceTest(unittest.TestCase):
             raw_edge=Decimal("0.1"),
             executable_ev=Decimal("0.1"),
             friction_to_edge_ratio=Decimal("0.2"),
-            # Use 5.5 to exceed the new PORTFOLIO_RISK_LIMIT=5.0 (raised
-            # 2026-05-17 from 1.80 to match the multi-bracket-per-city era;
-            # see engines/risk.py for rationale).
-            portfolio_risk_units_value=Decimal("5.5"),
+            # Use 55.0 to exceed PORTFOLIO_RISK_LIMIT=50.0 (raised
+            # 2026-05-18 from 5.0 — the previous 5.0 cap was hard-vetoing
+            # every new market while only $1.06 of the $15 daily cap had
+            # been spent. See engines/risk.py for full cap history.)
+            portfolio_risk_units_value=Decimal("55.0"),
         )
         self.assertFalse(risk.exposure_ok)
         self.assertFalse(risk.correlation_ok)

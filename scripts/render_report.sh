@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # Render the daily cycle-report markdown from the JSONL data file.
 # Rebuilt from scratch every call — single source of truth is the JSONL.
 #
@@ -6,7 +6,7 @@
 
 set -uo pipefail
 
-ROOT="/Users/varmakammili/Documents/GitHub/KalshiWeatherTest"
+ROOT="${KALSHI_WEATHER_ROOT:-/Users/varmakammili/Documents/GitHub/KalshiWeatherTest}"
 DB="$ROOT/data/state/runtime.sqlite3"
 date_et="${1:-$(TZ=America/New_York date +%Y-%m-%d)}"
 REPORT_DIR="$ROOT/logs/cycle_reports"

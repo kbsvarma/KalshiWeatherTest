@@ -1,0 +1,29 @@
+# Streamlit runtime config for the Kalshi Weather Bot dashboard.
+#
+# Pinning theme.base = "light" prevents the dark-mode flash on page load.
+# Without this, Streamlit auto-detects the OS theme (dark on this machine),
+# paints its built-in dark background, and only ~100ms later does our
+# custom CSS in dashboard.py override it back to light — visible as a
+# black frame that flashes white. Pinning forces the initial paint to be
+# light so there's no flash.
+#
+# All colors below match the palette in dashboard.py's CSS block so there's
+# a single source of truth for the look.
+
+[theme]
+base = "light"
+primaryColor = "#0066cc"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f5f5f7"
+textColor = "#1f2937"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+# Don't auto-reopen the page on file change — Streamlit's default
+# behavior tries to "reconnect" which can cause another flash. We rely
+# on the hot-reload happening on the client side via the existing
+# websocket connection instead.
+runOnSave = true

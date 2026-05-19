@@ -93,6 +93,35 @@ def load_health_status() -> dict:
     return {"healthy": healthy, "raw": out, "summary": summary, "last_cycle_line": last_cycle}
 
 
+@st.cache_data(ttl=60)
+def load_kalshi_account() -> dict:
+    """Shell out to kalshi_account_snapshot.py and parse its JSON.
+
+    Returns one of:
+      {"balance_usd": float, "open_positions": int, "open_exposure_usd": float}
+      {"error": "<message>"}
+    Cached for 60s to avoid hammering the Kalshi private API on every
+    Streamlit re-run (the dashboard re-runs on every interaction).
+    """
+    script = ROOT / "scripts" / "kalshi_account_snapshot.py"
+    if not script.exists():
+        return {"error": "snapshot script missing"}
+    try:
+        r = subprocess.run(
+            ["/opt/anaconda3/bin/python3", str(script)],
+            capture_output=True, text=True, timeout=10,
+        )
+        out = (r.stdout or "").strip()
+        if not out:
+            return {"error": (r.stderr or "no output").strip()[:200]}
+        data = json.loads(out)
+        return data
+    except subprocess.TimeoutExpired:
+        return {"error": "kalshi API timeout"}
+    except Exception as exc:
+        return {"error": str(exc)[:200]}
+
+
 @st.cache_data(ttl=15)
 def load_heartbeat() -> dict:
     if not HEARTBEAT_FILE.exists():
@@ -119,13 +148,20 @@ def load_cycle_counts_today() -> dict:
     last_end_utc = ""
     today_utc_prefix = datetime.now(UTC).date().isoformat()
     today_et_date = datetime.now(ET).date()
+    # Literal markers — substring matches like ``"cycle end" in line`` will
+    # also match "cycle ended" in the skip-log line we emit when the cooldown
+    # gate skips a run. Use the full marker phrase so skip-log lines never
+    # inflate the count or pollute last_end_utc. (Same bug class as the
+    # 2026-05-18 PM cooldown regression that silently broke the bot.)
+    START_MARKER = "────── cycle start ──────"
+    END_MARKER = "────── cycle end ──────"
     try:
         with CRON_LOG.open() as f:
             for line in f:
                 # bracketed UTC stamp at start
-                if "cycle start" in line and today_utc_prefix in line:
+                if START_MARKER in line and today_utc_prefix in line:
                     started += 1
-                if "cycle end" in line and today_utc_prefix in line:
+                if END_MARKER in line and today_utc_prefix in line:
                     ended += 1
                     last_end_utc = line.split("]")[0].strip("[")
     except Exception:
@@ -145,10 +181,21 @@ def load_open_positions() -> pd.DataFrame:
     if conn is None:
         return pd.DataFrame()
     try:
+        # Currently-open positions: market was placed today AND has not been
+        # closed since. When the bot closes a position it INSERTS a new row
+        # with status LIKE 'CLOSED_%' rather than updating the original; the
+        # PLACED_EXECUTED row stays. So a naive ``status='PLACED_EXECUTED'``
+        # filter over-counts by including markets that have already been
+        # closed out. Exclude those via NOT IN.
+        # Bug found 2026-05-18 PM audit (was inflating dashboard open count
+        # by the 6 currently-closed positions).
         live_rows = conn.execute(
             "SELECT market_ticker, payload_json, status, created_at "
             "FROM live_orders WHERE status='PLACED_EXECUTED' "
             "AND substr(created_at, 1, 10) = ? "
+            "AND market_ticker NOT IN ("
+            "  SELECT market_ticker FROM live_orders WHERE status LIKE 'CLOSED_%'"
+            ") "
             "ORDER BY created_at",
             (_today_et_iso(),),
         ).fetchall()
@@ -237,10 +284,15 @@ def load_today_metrics() -> dict:
         spreads = [float(r[0]) for r in rows if r[0] is not None]
         if spreads:
             out["avg_spread_f"] = statistics.median(spreads)
-        # open + deployed
+        # Open positions only: placed today AND not already closed via a
+        # subsequent close-order row. Same NOT IN filter as in the table
+        # display. See bug audit 2026-05-18 PM.
         live = conn.execute(
             "SELECT payload_json FROM live_orders WHERE status='PLACED_EXECUTED' "
-            "AND substr(created_at, 1, 10) = ?",
+            "AND substr(created_at, 1, 10) = ? "
+            "AND market_ticker NOT IN ("
+            "  SELECT market_ticker FROM live_orders WHERE status LIKE 'CLOSED_%'"
+            ")",
             (today,),
         ).fetchall()
         out["open_count"] = len(live)
@@ -352,12 +404,17 @@ def load_city_overview() -> pd.DataFrame:
             existing = best_by_city.get(city_id)
             if existing is None or mae_f < existing[1]:
                 best_by_city[city_id] = (str(provider), mae_f)
-        # Open positions count by city — parse ticker → city via decisions
+        # Open positions count by city — parse ticker → city via decisions.
+        # Same NOT IN filter as the table/metric queries — exclude markets
+        # that have been closed via a subsequent CLOSED_* row.
         op_rows = conn.execute(
             "SELECT json_extract(payload_json, '$.market_ticker'), "
             "json_extract(payload_json, '$.ticker') "
             "FROM live_orders WHERE status='PLACED_EXECUTED' "
-            "AND substr(created_at, 1, 10) = ?",
+            "AND substr(created_at, 1, 10) = ? "
+            "AND market_ticker NOT IN ("
+            "  SELECT market_ticker FROM live_orders WHERE status LIKE 'CLOSED_%'"
+            ")",
             (_today_et_iso(),),
         ).fetchall()
         # We need ticker → city. Decision payloads carry city_id.
@@ -853,6 +910,41 @@ hb_value = heartbeat["phase"]
 hb_sub = f"{heartbeat['age_seconds']}s ago" if heartbeat["age_seconds"] is not None else "no heartbeat"
 pnl_color = "#047857" if unrealized >= 0 else "#b91c1c"
 pnl_str = f"${unrealized:+.2f}"
+
+# ── ACCOUNT row (Kalshi-live cash + exposure) ──
+# Sourced from the Kalshi private API via scripts/kalshi_account_snapshot.py.
+# Cached 60s to avoid hammering the API on every Streamlit interaction.
+# Renders three cards so the user can see at a glance:
+#   1. Cash sitting in the account (uninvested)
+#   2. Total $ tied up across ALL open positions (cross-day, not just today)
+#   3. $ deployed by NEW orders placed today (already shown elsewhere as
+#      "deployed" sub-text but duplicated here for completeness of the
+#      "where is my money?" view)
+acct = load_kalshi_account()
+if "error" in acct:
+    acct_balance_str = "—"
+    acct_exposure_str = "—"
+    acct_sub_balance = f"API: {acct['error'][:40]}"
+    acct_sub_exposure = "—"
+else:
+    acct_balance_str = f"${acct['balance_usd']:.2f}"
+    acct_exposure_str = f"${acct['open_exposure_usd']:.2f}"
+    acct_sub_balance = "cash available"
+    acct_sub_exposure = f"{acct['open_positions']} positions (all dates)"
+
+today_deployed_str = f"${metrics['deployed_usd']:.2f}"
+today_deployed_sub = (
+    f"{metrics['open_count']} order{'s' if metrics['open_count'] != 1 else ''} today"
+)
+
+account_html = (
+    "<div style='display:grid;grid-template-columns:repeat(3, 1fr);gap:14px;margin-bottom:8px;'>"
+    + _metric_html("KALSHI BALANCE", acct_balance_str, acct_sub_balance)
+    + _metric_html("OPEN EXPOSURE", acct_exposure_str, acct_sub_exposure)
+    + _metric_html("DEPLOYED TODAY", today_deployed_str, today_deployed_sub)
+    + "</div>"
+)
+st.markdown(account_html, unsafe_allow_html=True)
 
 cards_html = (
     "<div style='display:grid;grid-template-columns:repeat(6, 1fr);gap:14px;margin-bottom:8px;'>"

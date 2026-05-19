@@ -7,17 +7,26 @@ from kalshi_weather.domain.models import CurrentStateEstimate, RiskDecision, Tra
 from kalshi_weather.engines.ev import DecisionThresholds
 
 
-# Raised 2026-05-17 from 1.80 → 5.0 after auditing 1086 morning decisions
-# showed `portfolio_risk_limit` blocking 600 of them. The 1.80 cap was
-# calibrated for the old single-position-per-city era; after enabling
-# multi-bracket-per-city (up to 3 markets/city × 18 cities = 54 possible
-# positions), the risk-unit sqrt() math meant 7 open positions ALREADY
-# exceeded 1.80 and no new bets could pass. The hard $15/day USD cap at
-# live_execution.py plus the 3-markets-per-city dedup are the real
-# concentration controls; this limit's job is to catch pathological
-# correlation cases, not to block every cycle. 5.0 = sqrt(25) which lines
-# up with the rough max bet count ($15 / $0.60 avg ≈ 25 contracts).
-PORTFOLIO_RISK_LIMIT = Decimal("5.0")
+# Raised 2026-05-18 from 5.0 → 50.0 after the user (correctly) called out
+# that the daily $/cap (15.0 in run_weather_cycle.sh) is the operative
+# spending guardrail. With 27 open positions overnight the risk-unit
+# computation hit 12.38 — well over 5.0 — and was hard-vetoing every
+# new evaluation, even though only $1.06 had been spent today out of $15.
+# Net effect: a "secondary" gate was functionally overriding the primary
+# spending policy.
+#
+# 50.0 is high enough that it's effectively non-binding under the current
+# 3-markets-per-city × 20-cities × $0.60 contracts model (worst case ~60
+# positions → sqrt(60) ≈ 7.7 units). It still trips on a true pathological
+# fully-correlated blow-up (e.g. 200+ same-side positions on the same
+# regime), which is the actual scenario this gate was designed for.
+#
+# Cap history:
+#   2026-05-16: 1.80   (single-position-per-city era)
+#   2026-05-17: 5.0    (sized for ~25 contracts on $15/day)
+#   2026-05-18: 50.0   (daily $/cap is the real governor; this just
+#                       catches catastrophic correlation cases)
+PORTFOLIO_RISK_LIMIT = Decimal("50.0")
 
 
 def build_risk_decision(

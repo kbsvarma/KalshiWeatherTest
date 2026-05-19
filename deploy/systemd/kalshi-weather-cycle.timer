@@ -1,0 +1,16 @@
+[Unit]
+Description=Trigger Kalshi Weather decision cycle every 30 minutes
+Requires=kalshi-weather-cycle.service
+
+[Timer]
+# Fire at :00 and :30 of every hour, ET-agnostic — the bot internally uses
+# UTC. With Lightsail in UTC this matches the Mac launchd schedule exactly.
+OnCalendar=*:00,30:00
+# Catch up missed firings (e.g., box was down)
+Persistent=true
+# Random 30-second jitter to avoid alignment with watchdog firings
+RandomizedDelaySec=30
+Unit=kalshi-weather-cycle.service
+
+[Install]
+WantedBy=timers.target

@@ -52,16 +52,27 @@ class VolumeSelectionThresholds:
     # only ~0.9¢, so 1¢ net edge still has decent Sharpe.
     min_executable_ev: Decimal = Decimal("0.005")
 
-    # Model consensus — if 11 forecast sources spread >8°F apart, the regime
+    # Model consensus — if 11 forecast sources spread >X°F apart, the regime
     # is too uncertain to bet, regardless of headline EV. The original LAX T71
     # bust came from a SINGLE-model extreme that consensus would have caught.
-    max_provider_spread_f: Decimal = Decimal("8.0")
+    #
+    # 2026-05-18 PM: aligned default from 8.0 → 10.0 to match the operational
+    # value in engines/shadow.py (_VOLUME_GRINDER_MAX_SPREAD_F). The mismatch
+    # was making survey_opportunities log "thresholds.max_provider_spread_f=8.0"
+    # while shadow actually gated at 10.0 — surveys reported rejections that
+    # would have passed live, and accepted candidates that shadow then dropped.
+    # See bug audit on 2026-05-18.
+    max_provider_spread_f: Decimal = Decimal("10.0")
 
     # Tradability / orderbook quality.
     min_tradability_score: Decimal = Decimal("0.55")
 
-    # Capital control — $10/day total exposure across all cities × thresholds.
-    daily_capital_cap_usd: Decimal = Decimal("10.0")
+    # Capital control — daily exposure cap.
+    # 2026-05-18 PM: aligned default from $10 → $15 to match the LIVE_DAILY_USD_CAP
+    # env var that run_weather_cycle.sh actually exports for live_execution.
+    # The mismatch caused survey logs to claim "10.0" cap while live used $15,
+    # making cap-related rejection counts in the cycle reports misleading.
+    daily_capital_cap_usd: Decimal = Decimal("15.0")
 
     # Minimum confidence: don't bet without basic model trust.
     min_overall_trade_confidence: Decimal = Decimal("0.35")

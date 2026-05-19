@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # Morning settlement fetch + cycle + survey.
 # Runs once daily around 12:30 UTC (after NWS CLI reports are published for
 # yesterday's settlements). Backfills settlements first so the counterfactual
@@ -6,14 +6,17 @@
 
 set -uo pipefail
 
-ROOT="/Users/varmakammili/Documents/GitHub/KalshiWeatherTest"
-PY="/opt/anaconda3/bin/python3"
+ROOT="${KALSHI_WEATHER_ROOT:-/Users/varmakammili/Documents/GitHub/KalshiWeatherTest}"
+PY="${KALSHI_WEATHER_PYTHON:-/opt/anaconda3/bin/python3}"
 LOG_DIR="$ROOT/logs"
 LOG_FILE="$LOG_DIR/cron_settlements.log"
 
+# shellcheck source=lib/portable.sh
+source "$ROOT/scripts/lib/portable.sh"
+
 mkdir -p "$LOG_DIR"
 
-if [[ -f "$LOG_FILE" && $(stat -f%z "$LOG_FILE") -gt 5242880 ]]; then
+if [[ -f "$LOG_FILE" && $(_file_size "$LOG_FILE") -gt 5242880 ]]; then
   mv "$LOG_FILE" "$LOG_FILE.$(date +%Y%m%d_%H%M%S)"
 fi
 

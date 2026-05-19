@@ -180,3 +180,18 @@ class KalshiPrivateClient:
 
     def get_user_data_timestamp(self) -> Mapping[str, Any]:
         return self.request_json("GET", "/exchange/user_data_timestamp")
+
+    def get_balance(self) -> Mapping[str, Any]:
+        """Return account balance. Response shape: {'balance': <cents>, ...}.
+
+        Used by the dashboard's ACCOUNT section to surface cash on hand.
+        """
+        return self.request_json("GET", "/portfolio/balance")
+
+    def list_positions(self, *, limit: int = 200) -> Mapping[str, Any]:
+        """Return open market positions. Response includes 'market_positions'
+        with per-market cost basis (market_exposure) — used by the dashboard
+        to show total cross-day exposure (vs the local DB which only sees
+        what the bot itself placed).
+        """
+        return self.request_json("GET", "/portfolio/positions", params={"limit": limit})

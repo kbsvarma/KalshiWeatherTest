@@ -1,0 +1,29 @@
+[Unit]
+Description=Kalshi Weather Bot — Streamlit dashboard (read-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__BOT_USER__
+Group=__BOT_USER__
+WorkingDirectory=__INSTALL_DIR__
+Environment=KALSHI_WEATHER_ROOT=__INSTALL_DIR__
+Environment=PYTHONPATH=__INSTALL_DIR__/src
+Environment=PYTHONUNBUFFERED=1
+# Bind to 0.0.0.0 so we can reach via the public IP + Lightsail firewall
+# (port 8501 must be opened separately via the AWS CLI).
+ExecStart=__INSTALL_DIR__/venv/bin/streamlit run \
+  __INSTALL_DIR__/scripts/dashboard.py \
+  --server.address 0.0.0.0 \
+  --server.port 8501 \
+  --server.headless true \
+  --server.fileWatcherType none \
+  --browser.gatherUsageStats false
+Restart=always
+RestartSec=10
+StandardOutput=append:__INSTALL_DIR__/logs/systemd_dashboard.log
+StandardError=append:__INSTALL_DIR__/logs/systemd_dashboard.log
+
+[Install]
+WantedBy=multi-user.target

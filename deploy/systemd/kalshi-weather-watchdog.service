@@ -1,0 +1,17 @@
+[Unit]
+Description=Kalshi Weather Bot — watchdog (detects missed cycles)
+
+[Service]
+Type=oneshot
+User=__BOT_USER__
+Group=__BOT_USER__
+WorkingDirectory=__INSTALL_DIR__
+Environment=KALSHI_WEATHER_ROOT=__INSTALL_DIR__
+Environment=KALSHI_WEATHER_PYTHON=__INSTALL_DIR__/venv/bin/python3
+ExecStart=/usr/bin/env bash __INSTALL_DIR__/scripts/watchdog.sh
+TimeoutStartSec=2min
+StandardOutput=append:__INSTALL_DIR__/logs/systemd_watchdog.log
+StandardError=append:__INSTALL_DIR__/logs/systemd_watchdog.log
+
+[Install]
+WantedBy=multi-user.target

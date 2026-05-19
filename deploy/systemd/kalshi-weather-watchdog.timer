@@ -1,0 +1,14 @@
+[Unit]
+Description=Trigger Kalshi Weather watchdog at :08 and :38
+Requires=kalshi-weather-watchdog.service
+
+[Timer]
+# Mirrors the Mac launchd schedule (:08 and :38). 8 min after each cycle
+# slot gives enough time for the cycle to complete before the watchdog
+# evaluates it.
+OnCalendar=*:08,38:00
+Persistent=true
+Unit=kalshi-weather-watchdog.service
+
+[Install]
+WantedBy=timers.target

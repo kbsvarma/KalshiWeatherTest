@@ -1,11 +1,28 @@
 from __future__ import annotations
 
+import re as _re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from collections import Counter
 from typing import Any, Iterable, Mapping
 from uuid import uuid4
+
+# Settlement-date extraction for cross-market dedup. The Kalshi weather ticker
+# format embeds the settle date as YYMMMDD between two dashes, e.g.
+# "KXHIGHTHOU-26MAY18-B86.5" → "26MAY18". We use this to ensure the decision
+# engine treats positions on different settlement days as independent.
+_TICKER_SETTLE_DATE_RE = _re.compile(r"-(\d{2}[A-Z]{3}\d{2})-")
+
+
+def _ticker_settle_date(ticker: str) -> str:
+    """Return the YYMMMDD settle-date token from a Kalshi ticker, or "".
+
+    Mirrors the helper in ``engines.shadow``. Kept inline (rather than
+    imported) to avoid widening this module's dependency surface.
+    """
+    m = _TICKER_SETTLE_DATE_RE.search(ticker or "")
+    return m.group(1) if m else ""
 
 from kalshi_weather.analytics.forecast_calibration import (
     extract_provider_bias_adjustments,
@@ -437,14 +454,57 @@ def run_market_decision_cycle(
     )
     thresholds = DecisionThresholds()
 
-    open_position = next(
-        (
-            position
-            for position_city_id, position in (open_positions or [])
-            if position_city_id == city_profile.city_id and position.lifecycle_status == "OPEN"
-        ),
+    # 2026-05-18 fix: scope ``open_position`` to positions on the SAME
+    # settlement date as the candidate market. Without this filter the
+    # bot got stuck overnight: every city that had bet earlier in the
+    # session (or had an open MAY-17 position rolling overnight) would
+    # hit the ``other_market_position is not None`` branch below for
+    # every new MAY-18 evaluation and downgrade to WATCH —
+    # explanation_code "city_position_already_open".
+    #
+    # FOLLOW-UP fix (later 2026-05-18): also lift the per-(city, date)
+    # cap from 1 to N where N = _MAX_DISTINCT_MARKETS_PER_CITY_PER_DAY
+    # (3, mirroring engines.shadow). Below that cap, an existing position
+    # on a DIFFERENT market shouldn't be a hard blocker — the bot is
+    # supposed to be able to fire on multiple non-overlapping bins per
+    # city per day. shadow.py and live_execution still enforce their own
+    # caps, so widening the decision-layer scope is safe.
+    #
+    # Mechanics:
+    #   - ``open_position`` keeps prefer-same-ticker semantics so
+    #     same-market position management (add/exit) still works.
+    #   - If the only candidate position is a DIFFERENT same-date
+    #     market AND we're still under the per-(city, date) cap, we
+    #     report ``open_position=None`` so the decision engine's
+    #     "other_market_position" gate doesn't fire. The portfolio
+    #     diversity bookkeeping below (open_city_ids, active_city_count)
+    #     is unaffected — it still sees the full open-position picture.
+    market_settle_date = _ticker_settle_date(market.market_ticker)
+    _SAME_CITY_DATE_CAP = 3  # mirrors engines.shadow._MAX_DISTINCT_MARKETS_PER_CITY_PER_DAY
+    _same_city_same_date_positions = [
+        position
+        for position_city_id, position in (open_positions or [])
+        if position_city_id == city_profile.city_id
+        and position.lifecycle_status == "OPEN"
+        and _ticker_settle_date(position.market_ticker) == market_settle_date
+    ]
+    # Prefer an exact-ticker match so same-market position handling stays
+    # intact (add-to-position / managed-exit paths in the branches below).
+    same_market_position_candidate = next(
+        (p for p in _same_city_same_date_positions if p.market_ticker == market.market_ticker),
         None,
     )
+    if same_market_position_candidate is not None:
+        open_position = same_market_position_candidate
+    elif len(_same_city_same_date_positions) < _SAME_CITY_DATE_CAP:
+        # Below the per-(city, date) cap — don't let an unrelated same-date
+        # position trigger the WATCH gate. shadow.py will still cap the
+        # actual fill at 3 distinct markets.
+        open_position = None
+    else:
+        # At/over the cap — surface the first as a blocker so the engine
+        # downgrades to WATCH like before.
+        open_position = _same_city_same_date_positions[0]
     open_city_ids = {
         position_city_id
         for position_city_id, position in (open_positions or [])

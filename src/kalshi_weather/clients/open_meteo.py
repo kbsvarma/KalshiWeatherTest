@@ -13,10 +13,49 @@ well above our usage (8 cities × ~24 cycles/day = ~200 calls/day).
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
+from threading import Lock
 from typing import Any
 
-from .http import http_get_json
+from .http import HttpRequestError, http_get_json
+
+
+# Process-wide circuit breaker for Open-Meteo. Added 2026-05-18 PM after
+# back-to-back manual cycle kicks during debugging blew past Open-Meteo's
+# free-tier rate limit (~10k req/day shared across our 20 cities × 9 models).
+# When the limit trips, every request returns HTTP 429 with a Retry-After
+# header that's often 60s+. The HTTP layer's 3-attempt retry policy means
+# each city spent 2-3 minutes on hopeless retries — 8+ minutes per cycle
+# was being burned on calls that could not succeed.
+#
+# Once we see a 429, mark Open-Meteo cooled-down for ``OM_COOLDOWN_SECONDS``
+# and fail-fast on subsequent calls. The bot still has NWS + NBM + grid
+# forecasts as primary signals — Open-Meteo is the diversity layer, not
+# load-bearing. Better to skip it cleanly than waste 8 min/cycle.
+_OM_COOLDOWN_SECONDS = 600  # 10 min — typical Open-Meteo per-IP throttle window
+_om_cooldown_until: float = 0.0
+_om_cooldown_lock = Lock()
+
+
+def _circuit_is_open() -> bool:
+    return time.time() < _om_cooldown_until
+
+
+def _trip_circuit(reason: str = "") -> None:
+    global _om_cooldown_until
+    with _om_cooldown_lock:
+        _om_cooldown_until = time.time() + _OM_COOLDOWN_SECONDS
+    # Single line per cycle (printed by the first city to trip it) so
+    # operators can see WHY Open-Meteo dropped from the ensemble.
+    print(
+        f"[OM-CIRCUIT] tripped for {_OM_COOLDOWN_SECONDS}s "
+        f"(reason: {reason or 'rate_limited'})"
+    )
+
+
+class OpenMeteoRateLimited(RuntimeError):
+    """Raised by the circuit breaker to short-circuit the per-city call."""
 
 
 # ----------------------------------------------------------------------------
@@ -97,6 +136,9 @@ class OpenMeteoClient:
         """
         import statistics
         from .http import http_get_json
+        # Same circuit breaker as fetch_ensemble — same API, same rate-limit pool.
+        if _circuit_is_open():
+            return None
         params = {
             "latitude": str(latitude),
             "longitude": str(longitude),
@@ -106,6 +148,10 @@ class OpenMeteoClient:
         }
         try:
             payload = http_get_json("https://api.open-meteo.com/v1/forecast", params=params)
+        except HttpRequestError as exc:
+            if getattr(exc, "status_code", None) == 429 or "429" in str(exc):
+                _trip_circuit(reason=f"soil_moisture_429 lat={latitude}")
+            return None
         except Exception:
             return None
         if not isinstance(payload, dict):
@@ -149,6 +195,10 @@ class OpenMeteoClient:
         Returns the raw JSON payload. The payload has one hourly array per
         (variable, model) combination, e.g. ``hourly.temperature_2m_gfs_global``.
         """
+        # Circuit breaker: if we've recently been rate-limited, fail-fast
+        # instead of waiting on a 60s Retry-After × 3 attempts per city.
+        if _circuit_is_open():
+            raise OpenMeteoRateLimited("open-meteo circuit open (cooling down)")
         params: dict[str, Any] = {
             "latitude": f"{latitude}",
             "longitude": f"{longitude}",
@@ -160,7 +210,14 @@ class OpenMeteoClient:
             "wind_speed_unit": "kn",
             "precipitation_unit": "mm",
         }
-        payload = http_get_json(self.BASE_URL, params=params)
+        try:
+            payload = http_get_json(self.BASE_URL, params=params)
+        except HttpRequestError as exc:
+            # On 429, trip the circuit so subsequent cities skip immediately.
+            if getattr(exc, "status_code", None) == 429 or "429" in str(exc):
+                _trip_circuit(reason=f"http_429 lat={latitude} lon={longitude}")
+                raise OpenMeteoRateLimited(str(exc)) from exc
+            raise
         if not isinstance(payload, Mapping):
             raise OpenMeteoClientError("open-meteo returned non-object payload")
         if "hourly" not in payload:
