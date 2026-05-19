@@ -40,13 +40,19 @@ else
   _systemd_line() {
     local svc="$1"
     local timer="${svc%.service}.timer"
-    if ! systemctl list-unit-files 2>/dev/null | grep -q "^$svc"; then
+    # Probe is-active on the timer first. If the timer doesn't exist
+    # systemctl returns "inactive" with exit 3 (treated same as missing).
+    # If the unit isn't even installed, "inactive" is returned too — so
+    # to distinguish "scheduled" from "not installed" we ALSO check the
+    # show command which returns empty/unknown for non-existent units.
+    local timer_active service_active main_pid exit_status load_state
+    timer_active=$(systemctl is-active "$timer" 2>/dev/null || true)
+    service_active=$(systemctl is-active "$svc" 2>/dev/null || true)
+    load_state=$(systemctl show -p LoadState --value "$svc" 2>/dev/null)
+    if [[ -z "$load_state" || "$load_state" == "not-found" ]]; then
       echo ""
       return
     fi
-    local timer_active service_active main_pid exit_status
-    timer_active=$(systemctl is-active "$timer" 2>/dev/null || echo missing)
-    service_active=$(systemctl is-active "$svc" 2>/dev/null || echo unknown)
     main_pid=$(systemctl show -p MainPID --value "$svc" 2>/dev/null)
     exit_status=$(systemctl show -p ExecMainStatus --value "$svc" 2>/dev/null)
     if [[ "$service_active" == "active" && -n "$main_pid" && "$main_pid" != "0" ]]; then
@@ -57,7 +63,7 @@ else
       # last exit code (0 if last run succeeded).
       echo "- ${exit_status:-0} $svc"
     else
-      # No timer, no run — treat as not loaded.
+      # Unit installed but timer not active — treat as not loaded.
       echo ""
     fi
   }
