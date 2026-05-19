@@ -876,6 +876,34 @@ if not positions_df.empty:
 health_class = "healthy" if health["healthy"] else ("down" if health["summary"] == "DOWN" else "unknown")
 health_dot_color = "#047857" if health["healthy"] else ("#b91c1c" if health["summary"] == "DOWN" else "#6b7280")
 
+# Platform-aware scheduler label + dynamic city count.
+# Mac runs under launchd, Lightsail/EC2 runs under systemd. Both names
+# surface in the header so it's clear at a glance which host is live.
+import platform as _platform
+_scheduler_label = "Mac launchd" if _platform.system() == "Darwin" else "Lightsail systemd"
+try:
+    _registry = json.loads((ROOT / "data" / "reference" / "registry.json").read_text())
+    _city_count = len(_registry.get("city_profiles", []))
+except Exception:
+    _city_count = 0
+_city_str = f"{_city_count} cities" if _city_count else "cities"
+# Series detection — does this deployment include LOW markets, or just HIGH?
+# Inspect the series_ticker prefix (KXHIGH... / KXLOW...).
+try:
+    _tickers = [s.get("series_ticker", "") for s in _registry.get("series_definitions", [])]
+    _has_high = any(t.startswith("KXHIGH") for t in _tickers)
+    _has_low = any(t.startswith("KXLOW") for t in _tickers)
+    if _has_high and _has_low:
+        _series_str = "HIGH + LOW"
+    elif _has_high:
+        _series_str = "HIGH"
+    elif _has_low:
+        _series_str = "LOW"
+    else:
+        _series_str = "weather"
+except Exception:
+    _series_str = "HIGH + LOW"
+
 st.markdown(
     f"""
     <div style='background:#fff;border:1px solid #e5e7eb;border-radius:10px;
@@ -895,7 +923,7 @@ st.markdown(
                 </a>
             </div>
             <div style='color:#6b7280;font-size:12px;margin-top:6px;'>
-                18 cities · HIGH + LOW · Mac launchd · last cycle {cycles_today["last_end_et"]}
+                {_city_str} · {_series_str} · {_scheduler_label} · last cycle {cycles_today["last_end_et"]}
                 &nbsp;·&nbsp; <span style='color:#9ca3af;font-size:11px;'>click the status badge to re-check</span>
             </div>
         </div>
