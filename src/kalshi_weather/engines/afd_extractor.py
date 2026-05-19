@@ -18,13 +18,20 @@ Design notes:
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
-OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_MODEL = "llama3.2:latest"
-OLLAMA_TIMEOUT_SECONDS = 20
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+# Default model tag: ``llama3.2:3b`` matches what scripts/lightsail/bootstrap.sh
+# pulls. Locally the Mac may have ``llama3.2:latest`` (an alias to 3b). Env-
+# overrideable so cloud and dev can use different model sizes without code
+# changes. 2026-05-19: was hard-coded to ``llama3.2:latest`` which doesn't
+# resolve on Lightsail (only :3b was pulled there) — silently no-op'd every
+# AFD extraction.
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
+OLLAMA_TIMEOUT_SECONDS = int(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "20"))
 
 _VALID_CONFIDENCE = {"low", "moderate", "high"}
 _VALID_REGIMES = {
