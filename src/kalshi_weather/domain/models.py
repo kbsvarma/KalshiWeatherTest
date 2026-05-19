@@ -192,6 +192,16 @@ class CurrentStateEstimate:
     spc_outlook_rank: int = 0  # 0=none, 2=MRGL, 3=SLGT, 4=ENH, 5=MDT, 6=HIGH
     afd_confidence: str | None = None  # "low" | "moderate" | "high"
     afd_model_spread_flag: bool | None = None
+    # Forecaster's stated synoptic regime, extracted by the LLM from the
+    # AFD narrative. One of the values in afd_extractor._VALID_REGIMES.
+    # Used to bias uncertainty (frontal_passage / convective = +) and
+    # nudge the model toward warm/cool when the forecaster calls out
+    # an anomaly (anomalous_warm / anomalous_cool).
+    afd_regime: str | None = None
+    # Forecaster's explicit point estimate for today's high (°F), or None
+    # if not stated. Blended with the ensemble mean at a low weight so the
+    # forecaster's "human eye" contributes without dominating.
+    afd_mentioned_today_high_f: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

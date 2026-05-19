@@ -224,6 +224,8 @@ def build_current_state_estimate(
     spc_outlook_rank: int = 0,
     afd_confidence: str | None = None,
     afd_model_spread_flag: bool | None = None,
+    afd_regime: str | None = None,
+    afd_mentioned_today_high_f: int | None = None,
 ) -> CurrentStateEstimate:
     if not observations:
         raise ValueError("observations are required")
@@ -414,4 +416,6 @@ def build_current_state_estimate(
         spc_outlook_rank=spc_outlook_rank,
         afd_confidence=afd_confidence,
         afd_model_spread_flag=afd_model_spread_flag,
+        afd_regime=afd_regime,
+        afd_mentioned_today_high_f=afd_mentioned_today_high_f,
     )

@@ -392,6 +392,8 @@ def run_market_decision_cycle(
     spc_outlook_rank: int = 0,
     afd_confidence: str | None = None,
     afd_model_spread_flag: bool | None = None,
+    afd_regime: str | None = None,
+    afd_mentioned_today_high_f: int | None = None,
 ) -> DecisionCycleResult:
     as_of_time = as_of_time or datetime.now(timezone.utc)
     settlement_rule = parse_settlement_rule(market_definition, station)
@@ -437,6 +439,8 @@ def run_market_decision_cycle(
         spc_outlook_rank=spc_outlook_rank,
         afd_confidence=afd_confidence,
         afd_model_spread_flag=afd_model_spread_flag,
+        afd_regime=afd_regime,
+        afd_mentioned_today_high_f=afd_mentioned_today_high_f,
     )
     path_result = apply_path_adjustment(
         distribution=forecast_result.distribution,

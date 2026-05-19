@@ -405,6 +405,8 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
     # AFD product id so we only pay 4 LLM calls per WFO per day.
     afd_confidence: str | None = None
     afd_model_spread_flag: bool | None = None
+    afd_regime: str | None = None
+    afd_mentioned_high_f: int | None = None
     try:
         afd_product = NwsAfdClient.fetch_latest(station.wfo_office)
         if afd_product and afd_product.raw_text:
@@ -415,9 +417,12 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
             )
             afd_confidence = extraction.confidence
             afd_model_spread_flag = extraction.model_spread_flag
+            afd_regime = extraction.regime
+            afd_mentioned_high_f = extraction.mentioned_today_high_f
             print(f"[AFD] {city_profile.city_id}: "
                   f"wfo={station.wfo_office} conf={extraction.confidence} "
                   f"spread={extraction.model_spread_flag} regime={extraction.regime} "
+                  f"high={extraction.mentioned_today_high_f} "
                   f"failed={extraction.extraction_failed}")
     except Exception as exc:  # never fatal
         print(f"[AFD] {city_profile.city_id}: lookup failed: {exc}")
@@ -634,6 +639,8 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
                 spc_outlook_rank=(spc_for_station.rank if spc_for_station else 0),
                 afd_confidence=afd_confidence,
                 afd_model_spread_flag=afd_model_spread_flag,
+                afd_regime=afd_regime,
+                afd_mentioned_today_high_f=afd_mentioned_high_f,
             )
         except SettlementRuleParseError:
             continue

@@ -382,7 +382,7 @@ def apply_path_adjustment(
     elif current_state.spc_outlook_rank >= 5:  # MDT / HIGH
         spc_uncertainty_addon = Decimal("0.10")
 
-    # AFD forecaster narrative → uncertainty.
+    # AFD forecaster narrative → uncertainty + bias.
     afd_uncertainty_addon = Decimal("0")
     if current_state.afd_confidence == "low":
         afd_uncertainty_addon += Decimal("0.02")
@@ -390,9 +390,35 @@ def apply_path_adjustment(
         afd_uncertainty_addon -= Decimal("0.01")  # small confidence boost
     if current_state.afd_model_spread_flag is True:
         afd_uncertainty_addon += Decimal("0.03")
-    # Cap the AFD contribution at [0, 0.05] so a bad LLM extraction
-    # cannot dominate.
-    afd_uncertainty_addon = max(Decimal("0"), min(Decimal("0.05"), afd_uncertainty_addon))
+    # 2026-05-19: also use the LLM-extracted ``regime`` signal — previously
+    # discarded. Regimes that mean "expect big day-over-day change" inflate
+    # uncertainty; stable regimes shrink it slightly.
+    regime = current_state.afd_regime
+    if regime in ("frontal_passage", "convective"):
+        # High-change regimes: ensemble forecasts of daily max are
+        # systematically less reliable when a front or convection is
+        # passing. Add real uncertainty.
+        afd_uncertainty_addon += Decimal("0.03")
+    elif regime in ("stable", "ridge", "marine_layer"):
+        # Stable regimes: forecasters agree, ensemble has tight spread,
+        # we can lean in slightly.
+        afd_uncertainty_addon -= Decimal("0.01")
+    elif regime in ("anomalous_warm", "anomalous_cool"):
+        # Forecaster explicitly flagging anomaly: still useful but the
+        # MAGNITUDE of the anomaly is what carries risk, not the label
+        # itself. Tiny bump.
+        afd_uncertainty_addon += Decimal("0.01")
+    # Cap the AFD contribution at [-0.02, 0.07] so a bad LLM extraction
+    # cannot dominate. Widened the floor (was 0) so high-confidence stable
+    # regimes can give a real boost.
+    afd_uncertainty_addon = max(Decimal("-0.02"), min(Decimal("0.07"), afd_uncertainty_addon))
+
+    # NOTE: ``current_state.afd_mentioned_today_high_f`` is extracted by
+    # the LLM but not yet applied as a prior pull on the distribution.
+    # That requires shifting the discrete PMF support which is a bigger
+    # math change — deferred. The signal is captured in the decision
+    # payload (via path_state) so we can backtest the value of using
+    # it before wiring it into the live decision.
 
     path_uncertainty_addon = min(
         Decimal("0.25"),
