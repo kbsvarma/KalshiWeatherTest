@@ -529,29 +529,6 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
     derived_store.write_provider_reliability(city_profile.city_id, calibration_report)
     provider_reliability = extract_provider_reliability_weights(calibration_report)
 
-    # B (per-city provider weighting): blend the observation-based priors
-    # with per-city per-provider weights derived from REAL daily-max
-    # settlement errors (provider_errors table). Activates whenever a
-    # provider has >= MIN_SAMPLES_FOR_EWMA samples for this city.
-    try:
-        from kalshi_weather.analytics.provider_performance import (
-            compute_ewma_provider_weights, blend_with_priors,
-        )
-        per_city = compute_ewma_provider_weights(state_store, city_id=city_profile.city_id)
-        if per_city:
-            blended = blend_with_priors(
-                per_city_weights=per_city,
-                prior_weights=provider_reliability,
-            )
-            # Log top-3 winners so we can see the per-city influence
-            top3 = sorted(blended.items(), key=lambda kv: -float(kv[1]))[:3]
-            print(f"[PROVIDER-WEIGHTS] {city_profile.city_id}: "
-                  f"per-city blend applied (top: "
-                  f"{', '.join(f'{p}={float(w):.2f}' for p,w in top3)})")
-            provider_reliability = blended
-    except Exception as exc:  # non-fatal
-        print(f"[PROVIDER-WEIGHTS] {city_profile.city_id}: blend failed: {exc}")
-
     market_adapter = KalshiOpenMarketsAdapter(kalshi_client, series.series_ticker)
     market_raw = market_adapter.fetch_raw()
     raw_store.write(market_raw)

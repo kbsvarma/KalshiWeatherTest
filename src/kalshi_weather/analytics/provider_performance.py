@@ -28,15 +28,8 @@ from decimal import Decimal
 # Half-life for the exponential decay in days. After this many days, an
 # error sample is weighted at 0.5 of a fresh sample.
 EWMA_HALF_LIFE_DAYS = 20
-# Minimum samples per provider per city before we trust the per-city
-# weight from provider_errors. Started at 20 (proper EWMA confidence)
-# then lowered 2026-05-17 — even 3-5 samples meaningfully distinguishes
-# the best provider (NYC NWS @ 1.89°F MAE) from the worst (GraphCast
-# 7.64°F). Blended 50/50 with priors so a few bad samples can't dominate.
-MIN_SAMPLES_FOR_EWMA = 3
-# Blending weight between per-city EWMA weights and existing priors.
-# 0.5 = equal influence. Will raise toward 0.8 as samples accumulate.
-PER_CITY_BLEND_WEIGHT = Decimal("0.5")
+# Minimum samples per provider per city before we trust the EWMA weight.
+MIN_SAMPLES_FOR_EWMA = 20
 
 
 def _season_key(settlement_date: str) -> str:
@@ -193,38 +186,3 @@ def compute_ewma_provider_weights(
     if total_q <= 0:
         return None
     return {p: q / total_q for p, q in quality_raw.items()}
-
-
-def blend_with_priors(
-    *,
-    per_city_weights: dict[str, float] | None,
-    prior_weights: dict[str, "Decimal"],
-    blend: "Decimal" = PER_CITY_BLEND_WEIGHT,
-) -> dict[str, "Decimal"]:
-    """Blend per-city weights with global/prior weights.
-
-    Returns {provider: weight} sum-to-1.0. If per-city weights are None
-    (insufficient samples), returns the priors unchanged. If priors are
-    empty, returns the per-city weights as Decimals.
-    """
-    from decimal import Decimal as _D
-    if not per_city_weights:
-        return dict(prior_weights)
-    if not prior_weights:
-        return {p: _D(str(w)) for p, w in per_city_weights.items()}
-    # Normalize priors (they may sum to !=1 due to upstream clamping)
-    prior_total = sum(prior_weights.values())
-    if prior_total <= 0:
-        return {p: _D(str(w)) for p, w in per_city_weights.items()}
-    normalized_priors = {p: w / prior_total for p, w in prior_weights.items()}
-    out: dict[str, _D] = {}
-    all_providers = set(per_city_weights) | set(normalized_priors)
-    for provider in all_providers:
-        pc = _D(str(per_city_weights.get(provider, 0)))
-        pr = normalized_priors.get(provider, _D("0"))
-        out[provider] = blend * pc + (_D("1") - blend) * pr
-    # Re-normalize to 1.0 exactly
-    total = sum(out.values())
-    if total <= 0:
-        return dict(prior_weights)
-    return {p: w / total for p, w in out.items()}
