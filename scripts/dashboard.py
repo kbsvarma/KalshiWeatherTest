@@ -75,8 +75,11 @@ def load_health_status() -> dict:
     if not HEALTHCHECK.exists():
         return {"healthy": False, "raw": "healthcheck.sh missing", "summary": "UNKNOWN"}
     try:
+        # Use whatever bash/zsh is in PATH. On Linux /bin/zsh doesn't exist
+        # by default; on Mac /bin/bash works fine too. The script's shebang
+        # is /usr/bin/env bash so we let it find its own interpreter.
         result = subprocess.run(
-            ["/bin/zsh", str(HEALTHCHECK)],
+            [str(HEALTHCHECK)],
             capture_output=True, text=True, timeout=10,
         )
         out = (result.stdout or "") + (result.stderr or "")
@@ -107,8 +110,18 @@ def load_kalshi_account() -> dict:
     if not script.exists():
         return {"error": "snapshot script missing"}
     try:
+        # Pick whichever python3 the deployment environment uses:
+        # 1) KALSHI_WEATHER_PYTHON (cloud unit sets this to venv/bin/python3)
+        # 2) Hard-coded Mac anaconda3 fallback for local dev
+        # 3) PATH lookup (last resort)
+        py = os.environ.get("KALSHI_WEATHER_PYTHON")
+        if not py:
+            for candidate in ("/opt/anaconda3/bin/python3", "/usr/bin/python3", "python3"):
+                if candidate == "python3" or Path(candidate).exists():
+                    py = candidate
+                    break
         r = subprocess.run(
-            ["/opt/anaconda3/bin/python3", str(script)],
+            [py, str(script)],
             capture_output=True, text=True, timeout=10,
         )
         out = (r.stdout or "").strip()
