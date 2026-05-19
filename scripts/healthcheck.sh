@@ -33,23 +33,32 @@ if _is_darwin; then
   cycle_line=$(launchctl list 2>/dev/null | grep -E 'com\.varmakammili\.kalshi\.weather\.cycle$' || true)
   settle_line=$(launchctl list 2>/dev/null | grep com.varmakammili.kalshi.weather.settlements || true)
 else
-  # systemd: synthesize the same "PID exitcode label" shape so the parsing
-  # below works unchanged. Active+running with a PID → "PID 0 unit". Failed
-  # → "- ExecMainStatus unit". Inactive → "" (empty, treated as not loaded).
+  # systemd: oneshot services are scheduled by .timer units. They're
+  # "active" only during a run, "inactive" between runs. So we check
+  # the TIMER (which is "active" if scheduled to fire) rather than the
+  # service itself. Last exit comes from the service's ExecMainStatus.
   _systemd_line() {
-    local unit="$1"
-    if ! systemctl list-unit-files 2>/dev/null | grep -q "^$unit"; then
+    local svc="$1"
+    local timer="${svc%.service}.timer"
+    if ! systemctl list-unit-files 2>/dev/null | grep -q "^$svc"; then
       echo ""
       return
     fi
-    local active main_pid exit_status
-    active=$(systemctl is-active "$unit" 2>/dev/null)
-    main_pid=$(systemctl show -p MainPID --value "$unit" 2>/dev/null)
-    exit_status=$(systemctl show -p ExecMainStatus --value "$unit" 2>/dev/null)
-    if [[ "$active" == "active" && -n "$main_pid" && "$main_pid" != "0" ]]; then
-      echo "$main_pid 0 $unit"
+    local timer_active service_active main_pid exit_status
+    timer_active=$(systemctl is-active "$timer" 2>/dev/null || echo missing)
+    service_active=$(systemctl is-active "$svc" 2>/dev/null || echo unknown)
+    main_pid=$(systemctl show -p MainPID --value "$svc" 2>/dev/null)
+    exit_status=$(systemctl show -p ExecMainStatus --value "$svc" 2>/dev/null)
+    if [[ "$service_active" == "active" && -n "$main_pid" && "$main_pid" != "0" ]]; then
+      # Currently running
+      echo "$main_pid 0 $svc"
+    elif [[ "$timer_active" == "active" ]]; then
+      # Scheduled and waiting — that's healthy for a oneshot. Surface the
+      # last exit code (0 if last run succeeded).
+      echo "- ${exit_status:-0} $svc"
     else
-      echo "- ${exit_status:-0} $unit"
+      # No timer, no run — treat as not loaded.
+      echo ""
     fi
   }
   cycle_line=$(_systemd_line kalshi-weather-cycle.service)
@@ -79,7 +88,7 @@ else
 fi
 
 if [[ -z "$settle_line" ]]; then
-  report "✗ SETTLEMENTS job NOT LOADED in launchd"
+  report "✗ SETTLEMENTS job NOT LOADED (launchd on macOS / systemd on Linux)"
   health=1
 else
   settle_exit=$(echo "$settle_line" | awk '{print $2}')
