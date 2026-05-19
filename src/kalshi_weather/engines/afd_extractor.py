@@ -197,6 +197,12 @@ def extract_afd_signals(afd_text: str) -> AfdExtraction:
         # 120 tokens is plenty for the small JSON we ask for. Smaller
         # num_predict caps the worst-case inference time.
         "options": {"temperature": 0, "num_predict": 120},
+        # Keep the model loaded in RAM between calls. Ollama's default
+        # eviction is 5 min — on a 2 vCPU Lightsail box, cold-start is
+        # 30-90s per cycle (kills the 20s timeout we used to have).
+        # 2h ≫ 30-min cycle cadence so the model stays warm across all
+        # cycles in a day without us paying repeat warm-up costs.
+        "keep_alive": "2h",
     }
     request = urllib.request.Request(
         f"{OLLAMA_BASE_URL}/api/generate",
