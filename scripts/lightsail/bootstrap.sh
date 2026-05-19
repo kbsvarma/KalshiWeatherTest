@@ -39,7 +39,15 @@ BOT_GROUP="${BOT_USER}"
 GIT_URL="${KALSHI_WEATHER_GIT_URL:-}"
 GIT_REF="${KALSHI_WEATHER_GIT_REF:-main}"
 INSTALL_OLLAMA="${INSTALL_OLLAMA:-1}"
-OLLAMA_MODEL="${OLLAMA_MODEL:-llama3.2:3b}"
+# 2026-05-19: switched default to 1b on Lightsail's 2-vCPU box. 3b
+# inference was hitting the 90s extraction timeout. 1b runs in ~25-60s
+# warm and still produces valid JSON for our small extraction task
+# (confidence/model_spread_flag — the two signals the path engine
+# actually consumes). Operators wanting better quality can:
+#   INSTALL_OLLAMA=1 OLLAMA_MODEL=llama3.2:3b bash bootstrap.sh
+# and then ``systemctl edit kalshi-weather-cycle.service`` to set the
+# env var to match.
+OLLAMA_MODEL="${OLLAMA_MODEL:-llama3.2:1b}"
 
 PY_VERSION_MIN="3.10"
 

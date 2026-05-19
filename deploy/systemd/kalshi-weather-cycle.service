@@ -18,6 +18,11 @@ Environment=PYTHONUNBUFFERED=1
 # OR overridden via systemctl edit kalshi-weather-cycle.service.
 Environment=KALSHI_API_KEY_ID=2d618372-e5bb-4515-a5a5-0e41b4717ad6
 Environment=KALSHI_PRIVATE_KEY_PATH=__INSTALL_DIR__/secrets/private_key.pem
+# AFD extractor: use the smaller 1B model on cloud (2-vCPU box).
+# 3B is slower than the 90s budget, 1B finishes in ~25-60s warm.
+# Override per-deploy via systemctl edit if needed.
+Environment=OLLAMA_MODEL=llama3.2:1b
+Environment=OLLAMA_TIMEOUT_SECONDS=90
 # ── PAPER MODE — DO NOT EDIT MANUALLY ──
 # Use flip_to_live.sh to toggle. The script writes a systemd drop-in at
 # /etc/systemd/system/kalshi-weather-cycle.service.d/live.conf which
