@@ -60,7 +60,7 @@ case "${1:-help}" in
     run_remote "$*"
     ;;
   cycle)
-    run_remote 'sudo systemctl start kalshi-weather-cycle.service && echo cycle triggered (runs async, ~5 min)'
+    run_remote 'sudo systemctl start kalshi-weather-cycle.service && echo "cycle triggered (runs async, ~5 min)"'
     ;;
   status)
     run_remote '
