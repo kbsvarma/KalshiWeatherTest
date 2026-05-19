@@ -1,0 +1,22 @@
+# Runtime dependencies for the Kalshi weather bot.
+#
+# Kept deliberately minimal — the bot mostly uses Python stdlib
+# (urllib, sqlite3, json, decimal, datetime, etc.). Heavy third-party
+# packages are only pulled in by the dashboard layer or for crypto.
+#
+# Compatibility: Python >=3.10 (Lightsail Ubuntu 22.04 ships 3.10).
+# Local dev runs 3.13 happily on the same code.
+
+# Dashboard
+streamlit>=1.30
+pandas>=2.0
+markdown>=3.5
+
+# Kalshi private API signing (RSA-PSS). Optional — falls back to
+# openssl CLI if missing — but installing it is much faster.
+cryptography>=41
+
+# Tests (not strictly needed in prod but keeps `pip install -r requirements.txt`
+# usable for `pytest` invocations on the cloud box too)
+pytest>=8
+pytest-asyncio>=0.23
