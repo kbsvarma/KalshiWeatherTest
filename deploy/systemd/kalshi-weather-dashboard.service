@@ -9,6 +9,11 @@ User=__BOT_USER__
 Group=__BOT_USER__
 WorkingDirectory=__INSTALL_DIR__
 Environment=KALSHI_WEATHER_ROOT=__INSTALL_DIR__
+# KALSHI_WEATHER_PYTHON tells subprocess calls (kalshi_account_snapshot.py)
+# which Python to use. Without this, dashboard.py falls back to
+# /usr/bin/python3 which on Ubuntu 22.04 has cryptography 3.4.8 — too old
+# for the padding.PSS.DIGEST_LENGTH attribute the Kalshi signer uses.
+Environment=KALSHI_WEATHER_PYTHON=__INSTALL_DIR__/venv/bin/python3
 Environment=PYTHONPATH=__INSTALL_DIR__/src
 Environment=PYTHONUNBUFFERED=1
 # Pass Kalshi creds through to the snapshot subprocess the dashboard
