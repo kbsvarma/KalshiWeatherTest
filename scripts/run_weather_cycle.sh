@@ -135,7 +135,25 @@ trap 'rm -rf "$LOCK_DIR"' EXIT
 # Effects:
 #   Normal case (primary fires at :00, :30): backup at :15/:45 skips → 2 cycles/hr
 #   Failover case (primary :00 missed): backup at :15 runs → cadence shifts to :15/:45
-COOLDOWN_SECONDS=1200  # 20 min
+# Cooldown gate semantics:
+#   This must be > (backup-slot offset from primary end) so the backup
+#   scheduler skips when primary just ran. AND it must be < (primary slot
+#   interval - worst-case cycle duration) so the next primary doesn't
+#   get starved when cycles run long.
+#
+#   Backup fires at :15 / :45. If primary ends at :07-:12 (5-12 min cycle),
+#   backup age is 3-8 min when it fires → needs cooldown > 8 min.
+#   Next primary fires at :30 / :00. If cycle ran 12 min and ended at :12,
+#   primary age is 18 min when it fires → needs cooldown < 18 min.
+#
+# 2026-05-17: 270 → 420 (KXLOW activation slowed cycles)
+# 2026-05-18 AM: 420 → 540 → 660 → 960 (after timeout creeps)
+# 2026-05-18 PM-late: 1200 (added cooldown gate; was too generous)
+# 2026-05-19: 1200 → 720 (12 min). 20 min cooldown was starving the
+#   :30 primary whenever cycles ran > 10 min (which became the norm
+#   tonight on Mac with the larger state DB). 12 min comfortably
+#   skips :15/:45 backups while always letting :00/:30 primaries fire.
+COOLDOWN_SECONDS=720
 # CRITICAL: must match ONLY the real ────── cycle end ────── marker, NOT
 # the "last cycle ended ... — skipping" log we write below. Earlier version
 # used grep "cycle end" which also matched "cycle ended" via substring, so

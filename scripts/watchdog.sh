@@ -68,9 +68,9 @@ if [[ -n "$slot_epoch" ]]; then
     # that ended at 2:29:41 (22s before the slot).
     #
     # Must stay in sync with COOLDOWN_SECONDS in run_weather_cycle.sh
-    # (1200s = 20 min). The test_orchestration_invariants.py file pins
-    # this — change both values together or the test will fail.
-    COOLDOWN_SLOT_COVERAGE_SECONDS=1200
+    # (720s = 12 min as of 2026-05-19). The test_config_consistency.py
+    # file pins this — change both values together or the test will fail.
+    COOLDOWN_SLOT_COVERAGE_SECONDS=720
     if [[ "$slot_ran" == "no" ]]; then
       pre_slot_age=$(( slot_epoch - last_end_epoch ))
       if (( pre_slot_age > 0 && pre_slot_age < COOLDOWN_SLOT_COVERAGE_SECONDS )); then
