@@ -11,6 +11,14 @@ WorkingDirectory=__INSTALL_DIR__
 Environment=KALSHI_WEATHER_ROOT=__INSTALL_DIR__
 Environment=PYTHONPATH=__INSTALL_DIR__/src
 Environment=PYTHONUNBUFFERED=1
+# Pass Kalshi creds through to the snapshot subprocess the dashboard
+# invokes (scripts/kalshi_account_snapshot.py). Without these the
+# subprocess falls back to ``~/.kalshi/private_key.pem`` under the
+# kalshibot home dir (which doesn't exist) and the dashboard's ACCOUNT
+# row shows "API: [Errno 2] No such file or directory". Bug found
+# 2026-05-19 right after the cutover.
+Environment=KALSHI_API_KEY_ID=2d618372-e5bb-4515-a5a5-0e41b4717ad6
+Environment=KALSHI_PRIVATE_KEY_PATH=__INSTALL_DIR__/secrets/private_key.pem
 # Bind to 0.0.0.0 so we can reach via the public IP + Lightsail firewall
 # (port 8501 must be opened separately via the AWS CLI).
 ExecStart=__INSTALL_DIR__/venv/bin/streamlit run \
