@@ -31,7 +31,17 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 # resolve on Lightsail (only :3b was pulled there) — silently no-op'd every
 # AFD extraction.
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
-OLLAMA_TIMEOUT_SECONDS = int(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "20"))
+# Timeout bumped 20→90 on 2026-05-19 PM after the 2-vCPU Lightsail box took
+# >20s on first inference (cold-cache, full AFD). Extraction is cached by
+# product_id so we only pay this cost ~4x per WFO per day. 90s is generous
+# enough for slow cold-start while still bounded — fail-fast if the model
+# isn't reachable, otherwise wait for the real answer.
+OLLAMA_TIMEOUT_SECONDS = int(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "90"))
+# Max AFD text we send to the LLM. AFDs are ~6-10KB total but the
+# forecast-confidence and today-high signals live almost entirely in the
+# SYNOPSIS + NEAR/SHORT TERM sections, which are within the first ~2500
+# chars. Sending less = faster inference + lower hallucination risk.
+OLLAMA_AFD_MAX_CHARS = int(os.environ.get("OLLAMA_AFD_MAX_CHARS", "2500"))
 
 _VALID_CONFIDENCE = {"low", "moderate", "high"}
 _VALID_REGIMES = {
@@ -68,6 +78,41 @@ AFD text:
 \"\"\"
 
 JSON:"""
+
+
+def _slice_relevant_sections(afd_text: str, max_chars: int) -> str:
+    """Extract the parts of an AFD most relevant to today's forecast.
+
+    AFDs follow a stable section structure (NWS Directive 10-503):
+      .SYNOPSIS...      — large-scale pattern
+      .NEAR TERM...     — next ~6h (some offices)
+      .SHORT TERM...    — today through tomorrow
+      .LONG TERM...     — day 3+
+      .AVIATION...      — irrelevant for daily-high
+      .MARINE...        — irrelevant
+      .${WFO} WATCHES/WARNINGS... — alerts
+
+    We want SYNOPSIS + NEAR/SHORT TERM. They contain the forecaster's
+    confidence in TODAY's high, model-disagreement callouts, and the
+    regime descriptor. Falling back to head-of-AFD if section markers
+    aren't found preserves the previous behavior.
+    """
+    if not afd_text:
+        return ""
+    upper = afd_text.upper()
+    relevant_markers = (".SYNOPSIS", ".NEAR TERM", ".SHORT TERM", ".DISCUSSION", ".KEY MESSAGES")
+    stop_markers = (".LONG TERM", ".AVIATION", ".MARINE", ".HYDROLOGY", ".FIRE WEATHER", ".CLIMATE")
+    starts = [upper.find(m) for m in relevant_markers]
+    starts = [s for s in starts if s >= 0]
+    if not starts:
+        return afd_text[:max_chars]
+    start = min(starts)
+    # Find the first stop marker AFTER the start
+    stops = [upper.find(m, start) for m in stop_markers]
+    stops = [s for s in stops if s > start]
+    end = min(stops) if stops else start + max_chars
+    sliced = afd_text[start:end][:max_chars]
+    return sliced if sliced.strip() else afd_text[:max_chars]
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,16 +183,20 @@ def extract_afd_signals(afd_text: str) -> AfdExtraction:
             extraction_failed=True,
         )
 
-    # Truncate to a sane size — AFDs can be 5-10KB; the parts we care about
-    # are usually in the first 3000 chars (NEAR TERM / DISCUSSION sections).
-    truncated = afd_text[:3500]
+    # Prefer the SYNOPSIS + NEAR TERM / SHORT TERM sections — that's where
+    # today's forecast confidence lives. Fall back to head-of-AFD if we
+    # can't find them. Limiting to OLLAMA_AFD_MAX_CHARS keeps inference
+    # fast on small CPUs.
+    truncated = _slice_relevant_sections(afd_text, OLLAMA_AFD_MAX_CHARS)
 
     payload = {
         "model": OLLAMA_MODEL,
         "prompt": _PROMPT.format(afd_text=truncated),
         "stream": False,
         "format": "json",
-        "options": {"temperature": 0, "num_predict": 200},
+        # 120 tokens is plenty for the small JSON we ask for. Smaller
+        # num_predict caps the worst-case inference time.
+        "options": {"temperature": 0, "num_predict": 120},
     }
     request = urllib.request.Request(
         f"{OLLAMA_BASE_URL}/api/generate",
