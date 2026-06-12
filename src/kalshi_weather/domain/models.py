@@ -202,6 +202,37 @@ class CurrentStateEstimate:
     # if not stated. Blended with the ensemble mean at a low weight so the
     # forecaster's "human eye" contributes without dominating.
     afd_mentioned_today_high_f: int | None = None
+    # 2026-05-23: NWS forecast revision count over the past 24h. Computed
+    # as distinct ``provider_run_time`` values for NWS/NWS_GRID providers
+    # at this station. High revision count = forecast is volatile = wider
+    # uncertainty. Across our 20 cities the empirical range today was 3-11
+    # revisions/24h; >7 indicates a city where NWS has been actively
+    # adjusting today's forecast. None = unavailable.
+    nws_forecast_revisions_24h: int | None = None
+    # 2026-05-23: GEFS ensemble (30 perturbation members + control) statistics
+    # for today's high in °F, sourced from Open-Meteo's ensemble-api endpoint.
+    # ``gefs_ensemble_std_f`` is the inter-member spread — a true probabilistic
+    # uncertainty signal independent of our own model-fusion math. Typical
+    # values: 1-3°F for stable regimes, 4-6°F during transitions. Used as a
+    # uncertainty addon in the path engine.
+    # ``gefs_ensemble_mean_f`` is the across-member mean — captured for future
+    # blending experiments but not yet wired into the price.
+    # ``gefs_ensemble_member_count`` is how many members returned valid data
+    # (sanity check; expect ~31 when healthy). None = lookup unavailable.
+    gefs_ensemble_std_f: float | None = None
+    gefs_ensemble_mean_f: float | None = None
+    gefs_ensemble_member_count: int | None = None
+    # 2026-05-23: Intraday Bayesian update from ASOS observations. For each
+    # ASOS observation already taken today, we compare against the NWS hourly
+    # forecast for that same hour. The mean residual (obs - forecast) over
+    # already-observed hours is a posterior signal: if today is running +2°F
+    # warmer than forecast, the remaining-day high is also likely +2°F warmer.
+    # ``intraday_obs_forecast_bias_f`` = mean residual in °F (positive = warmer
+    # than forecast). ``intraday_obs_sample_hours`` = how many hourly obs
+    # contributed (need >=3 for a meaningful estimate). None = unavailable.
+    # Applied as a small p_yes nudge in the path engine (bounded ±0.04).
+    intraday_obs_forecast_bias_f: float | None = None
+    intraday_obs_sample_hours: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

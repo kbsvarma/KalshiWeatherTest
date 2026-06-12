@@ -33,9 +33,12 @@ run_remote() {
     --region "$REGION" \
     --timeout-seconds 600 \
     --query Command.CommandId --output text)
-  # Poll
+  # Poll — 2026-05-22: raised cap from 60×4s (4min) to 180×4s (12min) so
+  # slower cycles or queued AWS-side commands don't spam false-fail
+  # notifications back to the operator. The actual SSM SendCommand
+  # ``--timeout-seconds 600`` is the real ceiling.
   local status
-  for _ in $(seq 1 60); do
+  for _ in $(seq 1 180); do
     sleep 4
     status=$(aws ssm get-command-invocation --command-id "$cmd_id" \
       --instance-id "$INSTANCE" --region "$REGION" \

@@ -49,13 +49,19 @@ class LiveExecutionResult:
 
 
 # Hard limits (cannot be overridden by env without code review).
+# 2026-05-23 data audit: per-structure sizing.
+# T-yes: 5/6 settled wins, +227% ROI on 6 trades → size up to 2 contracts.
+# All other structures (T-no, B-yes, B-no): 1 contract baseline.
+# B-no is also gated OFF entirely via the b_no_disabled check below.
 MAX_CONTRACTS_PER_MARKET = 1
-# 2026-05-18 PM: aligned default from 10 → 15 to match LIVE_DAILY_USD_CAP in
-# run_weather_cycle.sh and analytics.volume_selection.daily_capital_cap_usd.
-# The default only kicks in if the env var is unset; in normal operation
-# the env var ($15) wins. Keeping the default consistent so that someone
-# running a Python tool outside the wrapper sees the same cap.
-DEFAULT_DAILY_USD_CAP = 15.0
+MAX_CONTRACTS_T_YES = 2  # T-yes only — the proven-profitable structure
+# 2026-05-18 PM: aligned default 10 → 15 to match LIVE_DAILY_USD_CAP env.
+# 2026-05-19 (afternoon, ET): raised 15 → 20 to give the bot more headroom
+# after the calibration+gate fixes started clearing 7+ candidates/cycle and
+# the previous $15 cap was projecting to bind by mid-afternoon ET.
+# The env var (LIVE_DAILY_USD_CAP) wins in production; this default only
+# fires for Python tools run outside the wrapper.
+DEFAULT_DAILY_USD_CAP = 20.0
 MIN_REMAINING_BALANCE_USD = 1.0
 # Refuse to place live orders on any market settling more than this many days
 # out. Current Kalshi behaviour is "today + tomorrow only" so this is a
@@ -591,7 +597,15 @@ def maybe_place_live_order(
             price_cents=price_cents, quantity=None, response=None,
         )
 
-    quantity = MAX_CONTRACTS_PER_MARKET  # hard-coded 1 contract per market
+    # 2026-05-23: structure-aware sizing. T-yes earned +227% ROI on 6 trades
+    # (settled May 17-19); scale it up to 2 contracts to capture more of the
+    # edge. Other structures stay at 1 contract.
+    is_t_market = "-T" in (explanation.market_ticker or "")
+    is_yes = (edge.side or "").lower() == "yes"
+    if is_t_market and is_yes:
+        quantity = MAX_CONTRACTS_T_YES
+    else:
+        quantity = MAX_CONTRACTS_PER_MARKET
 
     # Build the order payload
     client_order_id = f"kxweather_{explanation.decision_id[:16]}"

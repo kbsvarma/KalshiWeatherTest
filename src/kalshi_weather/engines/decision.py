@@ -394,6 +394,12 @@ def run_market_decision_cycle(
     afd_model_spread_flag: bool | None = None,
     afd_regime: str | None = None,
     afd_mentioned_today_high_f: int | None = None,
+    nws_forecast_revisions_24h: int | None = None,
+    gefs_ensemble_std_f: float | None = None,
+    gefs_ensemble_mean_f: float | None = None,
+    gefs_ensemble_member_count: int | None = None,
+    intraday_obs_forecast_bias_f: float | None = None,
+    intraday_obs_sample_hours: int | None = None,
 ) -> DecisionCycleResult:
     as_of_time = as_of_time or datetime.now(timezone.utc)
     settlement_rule = parse_settlement_rule(market_definition, station)
@@ -441,6 +447,12 @@ def run_market_decision_cycle(
         afd_model_spread_flag=afd_model_spread_flag,
         afd_regime=afd_regime,
         afd_mentioned_today_high_f=afd_mentioned_today_high_f,
+        nws_forecast_revisions_24h=nws_forecast_revisions_24h,
+        gefs_ensemble_std_f=gefs_ensemble_std_f,
+        gefs_ensemble_mean_f=gefs_ensemble_mean_f,
+        gefs_ensemble_member_count=gefs_ensemble_member_count,
+        intraday_obs_forecast_bias_f=intraday_obs_forecast_bias_f,
+        intraday_obs_sample_hours=intraday_obs_sample_hours,
     )
     path_result = apply_path_adjustment(
         distribution=forecast_result.distribution,
@@ -944,6 +956,13 @@ def run_market_decision_cycle(
             else None,
             "selected_provider_spread_f": str(forecast_result.provider_spread_f),
             "selected_provider_threshold_straddle_f": str(forecast_result.provider_threshold_straddle_f),
+            # 2026-05-26: expose the parsed settlement rule operator so the
+            # shadow layer can gate by it without re-parsing. Critical for
+            # the "less-yes" disable gate (the lane that produced 4W/35L
+            # -$4.61 in the backtest). settlement_rule.operator is one of
+            # ">", ">=", "<", "<=", "between".
+            "settlement_operator": settlement_rule.operator,
+            "settlement_threshold_f": str(settlement_rule.threshold_f) if settlement_rule.threshold_f is not None else None,
             "best_taker_candidate": _candidate_summary_payload(best_taker_candidate),
             "best_maker_candidate": _candidate_summary_payload(best_maker_candidate),
             "confidence_summary": confidence_summary,

@@ -50,7 +50,15 @@ class SQLiteStateStore:
 
     @contextmanager
     def _connect(self) -> Iterable[sqlite3.Connection]:
-        conn = sqlite3.connect(self.path)
+        # 2026-05-23: support concurrent readers + one writer via WAL,
+        # and wait up to 30s if a write lock is held by another thread/
+        # process. Without this, parallel city processing in
+        # run_city_cycle.py triggers "database is locked" exceptions.
+        # ``timeout=30`` is the connection-open lock-wait; the PRAGMA
+        # busy_timeout is the per-statement wait. Set both for safety.
+        conn = sqlite3.connect(self.path, timeout=30.0)
+        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA journal_mode=WAL")
         try:
             yield conn
             conn.commit()

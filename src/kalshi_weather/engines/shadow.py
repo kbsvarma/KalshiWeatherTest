@@ -22,7 +22,10 @@ class ShadowApplicationResult:
 # trades that the volume-grinder selector would have rejected. This keeps the
 # decision engine + selector consistent and prevents drift between what
 # *would* be bet live vs what's recorded in shadow.
-_VOLUME_GRINDER_MIN_P = Decimal("0.70")
+# 2026-05-19 PM shadow-mode wide-net: lowered 0.40 → 0.20 to match the new
+# selector floor while we calibrate during shadow. MUST stay in lockstep
+# with analytics.volume_selection.VolumeSelectionThresholds.min_model_probability.
+_VOLUME_GRINDER_MIN_P = Decimal("0.10")  # 2026-05-28: 0.30 → 0.10, lockstep with volume_selection.py — corrected backtest showed greater-yes longshots are profitable (+86% ROI); less-yes is already structurally blocked by Gate 2c so this only opens the proven-good lane
 _VOLUME_GRINDER_MAX_P = Decimal("0.97")
 # Raised 2026-05-17 from 8.0 → 10.0 after data showed it was leaving real
 # edge on the table. Audit (n=148 TAKER_ALLOWED candidates) found 69
@@ -43,7 +46,9 @@ _VOLUME_GRINDER_MIN_TRADABILITY = Decimal("0.55")
 # Allowing 3 distinct markets per city × ~$0.60 avg price = ~$1.80 per-city
 # risk concentration, well within the $15/day cap. Same-market dedup is still
 # enforced via the existing dedup check at the live-execution layer.
-_MAX_DISTINCT_MARKETS_PER_CITY_PER_DAY = 3
+# 2026-05-19 PM shadow-mode: raised 3 → 99 to log every candidate per city.
+# Restore to 3 (or your chosen value) when re-enabling live orders.
+_MAX_DISTINCT_MARKETS_PER_CITY_PER_DAY = 5
 # Market-disagreement gate: DISABLED 2026-05-16 evening.
 #
 # Originally added defensively after the LAX T71 longshot bust to refuse
@@ -93,21 +98,66 @@ def apply_shadow_decision(
     if edge.p_model < _VOLUME_GRINDER_MIN_P or edge.p_model > _VOLUME_GRINDER_MAX_P:
         return ShadowApplicationResult(fill=None, position=position)
 
-    # ── Gate 2: model consensus check — refuse to bet when the 11-source
-    # ensemble disagrees by more than max_provider_spread_f. Wide disagreement
-    # means the regime is too uncertain and the headline edge is unreliable.
+    # ── Gate 2: model consensus check — DISABLED ─────────────────────────
+    # 2026-05-19 PM data audit: this gate would have rejected bets netting
+    # +$7.56 across May 17-19 at 60-86% win rates. On all 3 days it was a
+    # winner-rejector. Disabled entirely — the path engine already
+    # incorporates provider spread into the posterior PMF via the weighted
+    # ensemble; gating here was double-counting.
+    is_between_strike = "-B" in (explanation.market_ticker or "")
+    is_no_side = (edge.side or "").lower() == "no"
     forecast_summary = explanation.forecast_summary or {}
-    spread_raw = forecast_summary.get("provider_spread_f")
-    if spread_raw is not None:
+    # (Spread gate intentionally not enforced.)
+
+    # ── Gate 2a: B-no DISABLED (2026-05-23 data audit) ──────────────────
+    # B-no settled n=27, ROI -1.9%; T-yes settled n=6, ROI +227%.
+    # Must stay in lockstep with analytics.volume_selection.
+    if is_between_strike and is_no_side:
+        return ShadowApplicationResult(fill=None, position=position)
+
+    # ── Gate 2c: "less-yes" DISABLED (2026-05-26 corrected-backtest audit) ──
+    # Honest backtest (using Kalshi's authoritative `result` field instead of
+    # my broken weather-vs-threshold math) showed:
+    #   strike_type=less, side=yes:  n=57, W=4, L=35, win%=10%, P&L=-$4.61
+    #   strike_type=greater, side=yes: n=10, W=2, L=4, win%=33%, P&L=+$1.56
+    # The bot's p_model systematically overestimates P(high < threshold)
+    # for far-OTM cool outcomes — bets at 0.05-0.40 model probability are
+    # losing at 90% rate. Until the cool-tail mis-calibration is diagnosed
+    # (task #16), refuse T-yes on "less" markets entirely.
+    # NB: "less" markets are still tradeable from the NO side; this gate
+    # only blocks the YES-on-less combo where we systematically lose.
+    settlement_op = (explanation.edge_summary or {}).get('settlement_operator', '')
+    if settlement_op in ('<', '<=') and (edge.side or '').lower() == 'yes':
+        return ShadowApplicationResult(fill=None, position=position)
+
+    # ── Gate 2b: bin-proximity for B-no ──────────────────────────────────
+    # 2026-05-19 PM data audit: B-no bets with |threshold - forecast_median|
+    # between 1-3°F lost at 25-33% win rate. ≥3°F gap won at 75-80%. When
+    # the bin straddles the forecast median, reality lands in it most
+    # often — betting NO is paying for the modal outcome.
+    if is_between_strike and is_no_side:
+        pmaxima = forecast_summary.get("provider_maxima_f") or {}
         try:
-            spread_f = Decimal(str(spread_raw))
-            if spread_f > _VOLUME_GRINDER_MAX_SPREAD_F:
-                return ShadowApplicationResult(fill=None, position=position)
+            vals = sorted(float(v) for v in pmaxima.values())
         except Exception:
-            pass
+            vals = []
+        if vals:
+            forecast_median = Decimal(str(vals[len(vals)//2]))
+            import re as _re
+            tm = _re.search(r"-B(\d+(?:\.\d+)?)$", explanation.market_ticker or "")
+            if tm:
+                threshold = Decimal(tm.group(1))
+                # 2026-05-22: raised 3°F → 5°F. Live data on 12 B-no trades
+                # in the 3-5°F band showed -43% ROI; the profitable zone is
+                # ≥5°F. Selector + shadow must stay in lockstep.
+                if abs(threshold - forecast_median) < Decimal("5.0"):
+                    return ShadowApplicationResult(fill=None, position=position)
 
     # ── Gate 3: minimum executable EV.
     if edge.executable_ev_per_contract < _VOLUME_GRINDER_MIN_EXEC_EV:
+        print(f"[SHADOW-DROP] {explanation.market_ticker} side={edge.side}: "
+              f"exec_ev={float(edge.executable_ev_per_contract):.4f} < "
+              f"floor {_VOLUME_GRINDER_MIN_EXEC_EV}")
         return ShadowApplicationResult(fill=None, position=position)
 
     # ── Gate 4: market liquidity — refuse to record a fill when the
@@ -119,6 +169,9 @@ def apply_shadow_decision(
         try:
             tradability = Decimal(str(trad_raw))
             if tradability < _VOLUME_GRINDER_MIN_TRADABILITY:
+                print(f"[SHADOW-DROP] {explanation.market_ticker} side={edge.side}: "
+                      f"tradability={float(tradability):.3f} < "
+                      f"floor {_VOLUME_GRINDER_MIN_TRADABILITY}")
                 return ShadowApplicationResult(fill=None, position=position)
         except Exception:
             pass
@@ -131,6 +184,10 @@ def apply_shadow_decision(
     # The recommendation log STILL captures these for later calibration.
     market_disagreement = abs(edge.p_model - edge.p_market_exec)
     if market_disagreement > _VOLUME_GRINDER_MAX_MARKET_DISAGREEMENT:
+        print(f"[SHADOW-DROP] {explanation.market_ticker} side={edge.side}: "
+              f"market_disagreement={float(market_disagreement):.3f} > "
+              f"cap {_VOLUME_GRINDER_MAX_MARKET_DISAGREEMENT} "
+              f"(p_model={float(edge.p_model):.3f}, p_market={float(edge.p_market_exec):.3f})")
         return ShadowApplicationResult(fill=None, position=position)
 
     # ── Gate 6: per-city cap — allow multiple DISTINCT market bets per city
@@ -139,10 +196,13 @@ def apply_shadow_decision(
     # SAME market is still prevented (the existing market_ticker dedup
     # below catches it).
     if explanation.market_ticker in distinct_open_markets:
-        # Already have a position on this exact market — skip duplicate.
+        print(f"[SHADOW-DROP] {explanation.market_ticker} side={edge.side}: "
+              f"already-open duplicate")
         return ShadowApplicationResult(fill=None, position=position)
     if len(distinct_open_markets) >= _MAX_DISTINCT_MARKETS_PER_CITY_PER_DAY:
-        # City has hit its per-day distinct-markets cap.
+        print(f"[SHADOW-DROP] {explanation.market_ticker} side={edge.side}: "
+              f"city_cap_hit ({len(distinct_open_markets)}/{_MAX_DISTINCT_MARKETS_PER_CITY_PER_DAY} "
+              f"distinct markets open in {city_id})")
         return ShadowApplicationResult(fill=None, position=position)
 
     base_fill = build_fill_simulations(explanation, edge)["base"]

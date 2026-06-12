@@ -24,7 +24,26 @@ from kalshi_weather.engines.afd_extractor import extract_afd_signals_cached
 # A hung HTTP call or a single city raising an unhandled exception used to
 # kill the entire cycle. With these limits each city is isolated and the
 # cycle has a hard ceiling so it can never overlap the next scheduled slot.
-MAX_CYCLE_SECONDS = 900  # 15 min — raised 2026-05-18 PM (third time)
+MAX_CYCLE_SECONDS = 1320  # 22 min — raised 2026-05-25 PM (fifth time)
+                          # Afternoon cycles hit 1100-1150s consistently
+                          # (candidate count doubles vs overnight). Temporary
+                          # bump while parallelization (task #11) lands;
+                          # afterwards can drop to ~600s comfortably.
+                          # Earlier (now-stale) comment from morning bump:
+                          # ----- 1080 (5/25 AM): -----
+                          # after 12:30 + 1:00 AM ET slots timed out at
+                          # 901s/900s respectively. The 900s ceiling sat
+                          # right at the cliff edge of typical 15-min
+                          # cycle runtime — natural variance of ±10s was
+                          # randomly tipping cycles over. 1080s gives a
+                          # ~3 min buffer, the lock TTL (960s in the
+                          # wrapper) means the next slot will no-op if
+                          # this one is still running past 16 min, and
+                          # the wrapper's external SIGKILL watchdog at
+                          # HARD_CYCLE_KILL (1000s default — needs bump
+                          # too) is the final enforcement.
+                          # Earlier history kept for context:
+                          #   2026-05-18 PM-mid:   900 (persistent slowdown)
                           # after cycles consistently ran 10-11+ min during
                           # the 1 PM ET range. The 600s ceiling kept firing
                           # SIGALRM on cycles that legitimately needed 10:11.
@@ -144,7 +163,37 @@ def _maybe_close_if_underwater(
     if pnl_cents >= 0:
         return  # in profit — hold
 
-    # Underwater + EXIT signal → close to limit further downside
+    # ── EV-based close gate (added 2026-05-24) ───────────────────────────
+    # Underwater alone is not a reason to sell. If the model still says
+    # the held side is more likely to win than the market is pricing in,
+    # holding to settlement has higher expected value than selling now.
+    # Without this gate, the bot was selling at 2¢-37¢ contracts that the
+    # model still gave 30-93% win probability — locking in losses that the
+    # path uncertainty had already priced into the orderbook overreaction.
+    # 7-day audit (May 17-24): 6 of 13 closes with p_model_at_close data
+    # were demonstrably -EV vs holding; total avoidable loss ~$1.20.
+    #
+    # Math: EV_hold per contract = held_prob * 100c. EV_sell = best_bid_c.
+    # Skip the close iff EV_hold > EV_sell + buffer. 3¢ buffer accounts for
+    # round-trip fees and tail risk that the model is overconfident.
+    if p_model_at_close is not None:
+        try:
+            p_yes = _D(str(p_model_at_close))
+            held_prob = p_yes if side_held == "yes" else (_D("1") - p_yes)
+            ev_hold_c = held_prob * _D("100")
+            if ev_hold_c > _D(best_bid_cents) + _D("3"):
+                print(f"[EXIT-EXEC] HOLD {market_ticker} {side_held} "
+                      f"@ {best_bid_cents}c (entry {entry_price_cents}c, "
+                      f"pnl {pnl_cents}c) — model says hold: "
+                      f"held_prob={float(held_prob):.3f} "
+                      f"ev_hold={float(ev_hold_c):.1f}c > sell {best_bid_cents}c+3c buffer")
+                return
+        except Exception as exc:
+            # If EV math blows up, fall through to the legacy underwater
+            # close — safer to close than to leave a bug-induced hold.
+            print(f"[EXIT-EXEC] EV-gate calc failed for {market_ticker}: {exc}")
+
+    # Underwater + EXIT signal + model agrees → close to limit further downside
     from kalshi_weather.engines.live_execution import maybe_close_position
     res = maybe_close_position(
         store=state_store,
@@ -156,9 +205,20 @@ def _maybe_close_if_underwater(
         close_reason="underwater_exit_signal",
     )
     if res.placed:
+        # Include held_prob / ev_hold in the print so weekly close audits
+        # can confirm the EV gate ran and agreed with the close.
+        ev_tag = ""
+        if p_model_at_close is not None:
+            try:
+                p_yes = _D(str(p_model_at_close))
+                held_prob = p_yes if side_held == "yes" else (_D("1") - p_yes)
+                ev_tag = (f" held_prob={float(held_prob):.3f} "
+                          f"ev_hold={float(held_prob * _D('100')):.1f}c")
+            except Exception:
+                ev_tag = ""
         print(f"[EXIT-EXEC] ✓ CLOSED {market_ticker} {side_held} "
               f"@ {best_bid_cents}c (entry {entry_price_cents}c, "
-              f"pnl {pnl_cents}c)")
+              f"pnl {pnl_cents}c){ev_tag}")
         # Mark shadow_position as closed so it doesn't keep firing EXIT
         try:
             state_store.delete_shadow_position(city_id, market_ticker)
@@ -286,6 +346,11 @@ def main() -> None:
     city_reports = []
     city_failures: list[dict] = []
     total_decisions = 0
+    # 2026-05-25: shared per-cycle HTTP cache. Cuts ~60 duplicate Open-Meteo
+    # + DB calls per cycle (city-level signals are series-independent but
+    # `iter_city_contexts` yields one context per series, so each city was
+    # fetched twice). Empirical wins: -80s GEFS, -40s soil, -10s NWS-rev.
+    cycle_cache: dict = {}
     baseline_open_positions = [
         (position.city_id, position)
         for position in state_store.list_shadow_positions()
@@ -303,13 +368,37 @@ def main() -> None:
         )
         if latest_signal is not None:
             baseline_open_position_signals.append(latest_signal)
+    # 2026-05-25: parallel per-city processing via ThreadPoolExecutor.
+    # Work is HTTP-bound (NWS + Open-Meteo + Kalshi) so GIL is not a
+    # constraint. Thread-safety verified:
+    #   - SQLiteStateStore: WAL mode, per-call connection, 30s busy_timeout
+    #   - HTTP clients: requests/urllib are thread-safe
+    #   - cycle_cache: dict ops are GIL-atomic; worst case two threads
+    #     race to fetch the same uncached endpoint → redundant work, not
+    #     wrong results
+    #   - Open-Meteo circuit breaker is Lock-protected at module level
+    # Stdout is NOT captured per-city — contextlib.redirect_stdout rebinds
+    # sys.stdout process-wide and would corrupt across threads. Log lines
+    # may interleave between cities; print() itself is atomic per call so
+    # individual lines remain intact (just out-of-city-order). The lines
+    # are tagged ([SPC] city_id: ..., [SOIL] city_id: ...) so grep-by-city
+    # still works.
+    # SIGALRM-based CycleTimeoutError only delivers to the main thread; on
+    # raise we shutdown the pool with cancel_futures=True so workers stop.
+    import concurrent.futures as _cf
+
+    contexts_to_run = []
     for context in registry.iter_city_contexts(seed):
-        station = context.station
-        city_profile = context.city_profile
-        series = context.series_definition
-        if selected_city_ids and city_profile.city_id not in selected_city_ids:
+        if selected_city_ids and context.city_profile.city_id not in selected_city_ids:
             continue
-        city_start = time.monotonic()
+        contexts_to_run.append(context)
+
+    def _run_one_city(context):
+        """Process one city in a worker thread.
+
+        Returns: (context, report_or_None, failure_dict_or_None)
+        """
+        start = time.monotonic()
         try:
             report = _process_city(
                 state_store=state_store,
@@ -318,47 +407,55 @@ def main() -> None:
                 nws_client=nws_client,
                 open_meteo_client=open_meteo_client,
                 kalshi_client=kalshi_client,
-                station=station,
-                city_profile=city_profile,
-                series=series,
+                station=context.station,
+                city_profile=context.city_profile,
+                series=context.series_definition,
                 baseline_open_positions=baseline_open_positions,
                 baseline_open_position_signals=baseline_open_position_signals,
                 active_kill_switch=active_kill_switch,
-                spc_for_station=spc_by_station.get(station.station_id),
+                spc_for_station=spc_by_station.get(context.station.station_id),
+                cycle_cache=cycle_cache,
             )
-            if report is None:
-                continue
-            city_reports.append(report)
-            total_decisions += report.get("decision_count", 0)
-            elapsed = time.monotonic() - city_start
-            if elapsed > MAX_CITY_SECONDS:
-                # Soft-warn — we didn't abort the city, just flag for the report
-                # so we can see which cities are slow.
-                city_failures.append({
-                    "city_id": city_profile.city_id,
+            elapsed = time.monotonic() - start
+            failure = None
+            if report is not None and elapsed > MAX_CITY_SECONDS:
+                failure = {
+                    "city_id": context.city_profile.city_id,
                     "kind": "slow",
                     "elapsed_seconds": round(elapsed, 1),
-                })
-        except CycleTimeoutError:
-            # Re-raise so the outer alarm handler bubbles up to main().
-            city_failures.append({
-                "city_id": city_profile.city_id,
-                "kind": "cycle_timeout_during_city",
-                "elapsed_seconds": round(time.monotonic() - city_start, 1),
-            })
-            raise
+                }
+            return (context, report, failure)
         except Exception as exc:  # noqa: BLE001
-            # One city's failure must not kill the cycle. Capture, log, continue.
             tb = traceback.format_exc(limit=3)
-            print(f"[CYCLE] ✗ city {city_profile.city_id} failed: {exc}\n{tb}")
-            city_failures.append({
-                "city_id": city_profile.city_id,
+            print(f"[CYCLE] ✗ city {context.city_profile.city_id} failed: {exc}\n{tb}")
+            return (context, None, {
+                "city_id": context.city_profile.city_id,
                 "kind": "exception",
                 "error_type": type(exc).__name__,
                 "error_message": str(exc)[:300],
-                "elapsed_seconds": round(time.monotonic() - city_start, 1),
+                "elapsed_seconds": round(time.monotonic() - start, 1),
             })
-            continue
+
+    # Worker count: 4 → 8 on 2026-05-28. Cycles were running ~21 min on
+    # 4 workers because 40 city-contexts / 4 = 10 sequential batches.
+    # Work is I/O-bound (HTTP wait), so doubling threads ≈ halves wall time.
+    # Open-Meteo circuit breaker protects against the rate-limit pool (~10k
+    # req/day shared). Tunable via env KALSHI_WEATHER_CITY_WORKERS.
+    _MAX_WORKERS = int(os.environ.get("KALSHI_WEATHER_CITY_WORKERS", "8"))
+    with _cf.ThreadPoolExecutor(max_workers=_MAX_WORKERS, thread_name_prefix="city") as pool:
+        futures = [pool.submit(_run_one_city, ctx) for ctx in contexts_to_run]
+        try:
+            for fut in _cf.as_completed(futures):
+                _ctx, report, failure = fut.result()
+                if report is not None:
+                    city_reports.append(report)
+                    total_decisions += report.get("decision_count", 0)
+                if failure is not None:
+                    city_failures.append(failure)
+        except CycleTimeoutError:
+            # SIGALRM delivered to main thread. Stop the pool fast and re-raise.
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
 
     # Cancel the cycle timeout — we made it to the end cleanly.
     signal.alarm(0)
@@ -390,6 +487,7 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
     baseline_open_position_signals,
     active_kill_switch: bool,
     spc_for_station=None,
+    cycle_cache: dict | None = None,
 ) -> dict | None:
     """Run the decision cycle for one city. Returns a city_report dict or None.
 
@@ -400,37 +498,74 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
     if qualification is None:
         return None
 
+    # 2026-05-25: per-cycle HTTP cache. `iter_city_contexts` yields TWO
+    # contexts per city (HIGH series + LOW series), so without caching
+    # the city-level fetches (SOIL, GEFS, NWS-REVISIONS) fire twice per
+    # city → ~80s of duplicate HTTP per cycle. Cache by station_id since
+    # all these signals are series-independent. Cache lives only for
+    # this cycle's main() invocation — next cycle starts fresh.
+    if cycle_cache is None:
+        cycle_cache = {}
+    _cache_soil = cycle_cache.setdefault("soil", {})
+    _cache_gefs = cycle_cache.setdefault("gefs", {})
+    _cache_nws_rev = cycle_cache.setdefault("nws_rev", {})
+
     # ── External signals (now LIVE — feed path engine via current_state) ──
-    # AFD: pulled per WFO, extracted by local LLM (Ollama), cached by
-    # AFD product id so we only pay 4 LLM calls per WFO per day.
+    # 2026-05-22: AFD/LLM extraction gated behind ENABLE_AFD_EXTRACTION.
+    # 200-sample backtest showed no AFD signal predicted forecast error at
+    # p<0.05; cost was 4-8 min/cycle on 2-vCPU box. Path engine handles
+    # afd_* = None as a no-op (no uncertainty modulation).
     afd_confidence: str | None = None
     afd_model_spread_flag: bool | None = None
     afd_regime: str | None = None
     afd_mentioned_high_f: int | None = None
-    try:
-        afd_product = NwsAfdClient.fetch_latest(station.wfo_office)
-        if afd_product and afd_product.raw_text:
-            extraction = extract_afd_signals_cached(
-                wfo=station.wfo_office,
-                product_id=afd_product.product_id,
-                afd_text=afd_product.raw_text,
-            )
-            afd_confidence = extraction.confidence
-            afd_model_spread_flag = extraction.model_spread_flag
-            afd_regime = extraction.regime
-            afd_mentioned_high_f = extraction.mentioned_today_high_f
-            print(f"[AFD] {city_profile.city_id}: "
-                  f"wfo={station.wfo_office} conf={extraction.confidence} "
-                  f"spread={extraction.model_spread_flag} regime={extraction.regime} "
-                  f"high={extraction.mentioned_today_high_f} "
-                  f"failed={extraction.extraction_failed}")
-    except Exception as exc:  # never fatal
-        print(f"[AFD] {city_profile.city_id}: lookup failed: {exc}")
+    if os.environ.get("ENABLE_AFD_EXTRACTION", "0") == "1":
+        try:
+            afd_product = NwsAfdClient.fetch_latest(station.wfo_office)
+            if afd_product and afd_product.raw_text:
+                extraction = extract_afd_signals_cached(
+                    wfo=station.wfo_office,
+                    product_id=afd_product.product_id,
+                    afd_text=afd_product.raw_text,
+                )
+                afd_confidence = extraction.confidence
+                afd_model_spread_flag = extraction.model_spread_flag
+                afd_regime = extraction.regime
+                afd_mentioned_high_f = extraction.mentioned_today_high_f
+                print(f"[AFD] {city_profile.city_id}: "
+                      f"wfo={station.wfo_office} conf={extraction.confidence} "
+                      f"spread={extraction.model_spread_flag} regime={extraction.regime} "
+                      f"high={extraction.mentioned_today_high_f} "
+                      f"failed={extraction.extraction_failed}")
+        except Exception as exc:  # never fatal
+            print(f"[AFD] {city_profile.city_id}: lookup failed: {exc}")
 
     # SPC outlook for this city (precomputed once per cycle, passed in)
     if spc_for_station is not None:
         print(f"[SPC] {city_profile.city_id}: category={spc_for_station.category} "
               f"rank={spc_for_station.rank} ok={spc_for_station.fetched_ok}")
+
+    # 2026-05-23: NWS forecast revision pace over last 24h. High revisions =
+    # NWS has been actively rewriting the forecast for today; small
+    # uncertainty bump in path engine.
+    nws_revisions_24h: int | None = _cache_nws_rev.get(station.station_id, "MISS")
+    if nws_revisions_24h == "MISS":
+        nws_revisions_24h = None
+        try:
+            cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+            with state_store._connect() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(DISTINCT provider_run_time) FROM forecasts "
+                    "WHERE station_id=? AND provider_id IN ('NWS','NWS_GRID') "
+                    "AND provider_run_time >= ?",
+                    (station.station_id, cutoff),
+                ).fetchone()
+                if row and row[0] is not None:
+                    nws_revisions_24h = int(row[0])
+                    print(f"[NWS-REVISIONS] {city_profile.city_id}: {nws_revisions_24h} distinct runs in last 24h")
+        except Exception as exc:
+            print(f"[NWS-REVISIONS] {city_profile.city_id}: lookup failed: {exc}")
+        _cache_nws_rev[station.station_id] = nws_revisions_24h
 
     # GOES proxy — surface the real-time sky_cover_code from NWS METAR
     # observations (already ingested). This is NOT true GOES satellite
@@ -450,18 +585,104 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
     except Exception:
         pass
 
-    # Soil moisture (single Open-Meteo call, near-surface)
+    # Soil moisture (single Open-Meteo call, near-surface) — cached per cycle
+    soil = _cache_soil.get(station.station_id, "MISS")
+    if soil == "MISS":
+        soil = None
+        try:
+            soil = open_meteo_client.fetch_soil_moisture(
+                latitude=float(station.latitude),
+                longitude=float(station.longitude),
+            )
+            if soil:
+                print(f"[SOIL] {city_profile.city_id}: "
+                      f"{soil['variable']} now={soil['current_value']:.3f} "
+                      f"24h_mean={soil['mean_24h']:.3f}")
+        except Exception as exc:
+            print(f"[SOIL] {city_profile.city_id}: lookup failed: {exc}")
+        _cache_soil[station.station_id] = soil
+
+    # 2026-05-23: GEFS ensemble probabilistic forecast — 30 perturbation
+    # members + control from NOAA GEFS, fetched via Open-Meteo's free
+    # ensemble-api. Inter-member spread = true probabilistic uncertainty,
+    # independent of our model-fusion math. Path engine uses std as a small
+    # uncertainty addon (capped at 0.03).
+    gefs_std_f: float | None = None
+    gefs_mean_f: float | None = None
+    gefs_member_count: int | None = None
+    cached_gefs = _cache_gefs.get(station.station_id, "MISS")
+    if cached_gefs == "MISS":
+        gefs = None
+        try:
+            gefs = open_meteo_client.fetch_gefs_ensemble_high(
+                latitude=float(station.latitude),
+                longitude=float(station.longitude),
+                timezone_name=station.timezone,
+            )
+            if gefs:
+                print(f"[GEFS-ENSEMBLE] {city_profile.city_id}: "
+                      f"n={int(gefs['count'])} mean={float(gefs['mean']):.1f}°F "
+                      f"std={float(gefs['std']):.2f}°F target={gefs['target_date']}")
+        except Exception as exc:
+            print(f"[GEFS-ENSEMBLE] {city_profile.city_id}: lookup failed: {exc}")
+        _cache_gefs[station.station_id] = gefs
+    else:
+        gefs = cached_gefs
+    if gefs:
+        gefs_std_f = float(gefs["std"])
+        gefs_mean_f = float(gefs["mean"])
+        gefs_member_count = int(gefs["count"])
+
+    # 2026-05-23: Intraday Bayesian update from ASOS observations.
+    # Compare today's already-observed hours vs the latest NWS hourly forecast
+    # for those same hours. Mean residual (obs - forecast) is a posterior
+    # signal for the remaining-day high. Path engine uses it as a bounded
+    # threshold shift (capped ±2°F, requires >=3 sample hours).
+    intraday_bias_f: float | None = None
+    intraday_sample_hours: int | None = None
     try:
-        soil = open_meteo_client.fetch_soil_moisture(
-            latitude=float(station.latitude),
-            longitude=float(station.longitude),
-        )
-        if soil:
-            print(f"[SOIL] {city_profile.city_id}: "
-                  f"{soil['variable']} now={soil['current_value']:.3f} "
-                  f"24h_mean={soil['mean_24h']:.3f}")
+        local_today = datetime.now(ZoneInfo(station.timezone)).date()
+        # Today's hourly obs (one per hour, latest if multiple)
+        all_obs = state_store.get_all_observations(station.station_id)
+        obs_by_hour: dict = {}
+        for o in all_obs:
+            if o.temperature_f is None:
+                continue
+            local_dt = o.event_time.astimezone(ZoneInfo(station.timezone))
+            if local_dt.date() != local_today:
+                continue
+            hour_key = local_dt.replace(minute=0, second=0, microsecond=0)
+            # Keep the obs closest to top of hour
+            prev = obs_by_hour.get(hour_key)
+            if prev is None or abs(local_dt.minute - 0) < abs(prev[0].minute - 0):
+                obs_by_hour[hour_key] = (local_dt, float(o.temperature_f))
+        # Latest NWS hourly forecast (NWS_GRID has hourly resolution)
+        nws_forecasts = [
+            f for f in state_store.get_latest_forecasts(station.station_id)
+            if f.provider_id in ("NWS_GRID", "NWS")
+        ]
+        forecast_by_hour: dict = {}
+        for snap in nws_forecasts:
+            for vt, tf in zip(snap.valid_for_times, snap.hourly_temp_path_f, strict=False):
+                if tf is None:
+                    continue
+                local_vt = vt.astimezone(ZoneInfo(station.timezone))
+                if local_vt.date() != local_today:
+                    continue
+                hour_key = local_vt.replace(minute=0, second=0, microsecond=0)
+                forecast_by_hour.setdefault(hour_key, float(tf))
+        residuals = []
+        for hour_key, (_, obs_t) in obs_by_hour.items():
+            fc_t = forecast_by_hour.get(hour_key)
+            if fc_t is not None:
+                residuals.append(obs_t - fc_t)
+        if len(residuals) >= 3:
+            intraday_bias_f = sum(residuals) / len(residuals)
+            intraday_sample_hours = len(residuals)
+            print(f"[INTRADAY-BIAS] {city_profile.city_id}: "
+                  f"bias={intraday_bias_f:+.2f}°F n={intraday_sample_hours}h")
     except Exception as exc:
-        print(f"[SOIL] {city_profile.city_id}: lookup failed: {exc}")
+        print(f"[INTRADAY-BIAS] {city_profile.city_id}: lookup failed: {exc}")
     # ───────────────────────────────────────────────────────────────────────
 
     # T1.3 persistence baseline — looked up PER MARKET because settlement
@@ -538,12 +759,45 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
     series_payload = kalshi_client.get_series(series.series_ticker)
     fee_multiplier = (series_payload.get("series", {}) or {}).get("fee_multiplier") or 1
 
-    # ── Prefetch orderbook + trades for all markets concurrently ──
-    # Before: each market did 2 sequential HTTP calls inside the decision
-    # loop = ~600ms × 20 markets/city × 18 cities = 216s/cycle just on
-    # this layer. Now: 6 worker threads fetch them in parallel; the
-    # decision loop below uses the prefetched data. Kalshi public client
-    # is stateless so concurrent calls are safe.
+    # ── Pre-filter markets we know we'll auto-reject ──────────────────
+    # 2026-05-28: profile showed ~200 Kalshi orderbook fetches per cycle =
+    # ~800s wasted on markets that downstream gates immediately reject.
+    # Filter BEFORE the prefetch:
+    #   - "-B" tickers: B-no is structurally blocked (28 of 55 typical
+    #     candidates); B-yes is marginal and rarely qualifies. Skipping
+    #     all B markets saves ~50% of fetches.
+    #   - strike_type='less': less-yes is structurally blocked (the
+    #     -$5.61 lane); less-no is a marginal 5-bet lane. Acceptable
+    #     tradeoff for the speed win.
+    # Keep: T markets with strike_type='greater' (the proven +86% ROI
+    # lane) — these are the only markets where the bot has historical
+    # edge anyway.
+    def _ticker_is_b(tkr: str) -> bool:
+        last = tkr.rsplit('-', 1)[-1]
+        return last.startswith('B')
+
+    payload_by_ticker = {p.get('ticker'): p for p in market_payloads}
+    keep_pairs: list[tuple] = []
+    skipped_b = skipped_less = 0
+    for ms, pl in zip(market_snapshots, market_payloads, strict=False):
+        if _ticker_is_b(ms.market_ticker):
+            skipped_b += 1
+            continue
+        if pl.get('strike_type') == 'less':
+            skipped_less += 1
+            continue
+        keep_pairs.append((ms, pl))
+    if skipped_b or skipped_less:
+        print(f"[CYCLE-FILTER] {city_profile.city_id}: skipping {skipped_b} B-markets + {skipped_less} less-markets "
+              f"(prefetch only {len(keep_pairs)} of {len(market_snapshots)} markets)")
+    filtered_snapshots = [ms for ms, _ in keep_pairs]
+    filtered_payloads  = [pl for _,  pl in keep_pairs]
+
+    # ── Prefetch orderbook + trades for surviving markets concurrently ──
+    # Before this optimization, each market did 2 sequential HTTP calls
+    # inside the decision loop. Now: 6 worker threads fetch in parallel;
+    # the decision loop below uses the prefetched data. Kalshi public
+    # client is stateless so concurrent calls are safe.
     from concurrent.futures import ThreadPoolExecutor
 
     def _prefetch_market(ms) -> tuple[str, dict | None]:
@@ -561,8 +815,11 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
 
     prefetched: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=6) as pool:
-        for ticker, data in pool.map(_prefetch_market, market_snapshots):
+        for ticker, data in pool.map(_prefetch_market, filtered_snapshots):
             prefetched[ticker] = data
+    # Use filtered lists for the decision loop too
+    market_snapshots = filtered_snapshots
+    market_payloads = filtered_payloads
 
     decision_results: list[dict] = []
     for market_snapshot, payload in zip(market_snapshots, market_payloads, strict=False):
@@ -618,6 +875,12 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
                 afd_model_spread_flag=afd_model_spread_flag,
                 afd_regime=afd_regime,
                 afd_mentioned_today_high_f=afd_mentioned_high_f,
+                nws_forecast_revisions_24h=nws_revisions_24h,
+                gefs_ensemble_std_f=gefs_std_f,
+                gefs_ensemble_mean_f=gefs_mean_f,
+                gefs_ensemble_member_count=gefs_member_count,
+                intraday_obs_forecast_bias_f=intraday_bias_f,
+                intraday_obs_sample_hours=intraday_sample_hours,
             )
         except SettlementRuleParseError:
             continue

@@ -13,7 +13,13 @@
 
 set -uo pipefail
 
-ROOT="${KALSHI_WEATHER_ROOT:-/Users/varmakammili/Documents/GitHub/KalshiWeatherTest}"
+# 2026-05-22: auto-detect install root instead of hardcoding the Mac dev
+# path. The dashboard subprocess on Lightsail doesn't always inherit
+# KALSHI_WEATHER_ROOT — falling back to the script's parent directory
+# works on Mac (worktree) and Linux (/opt/kalshi-weather) identically.
+_SCRIPT_DIR_HC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_AUTO_ROOT_HC="$(cd "$_SCRIPT_DIR_HC/.." && pwd)"
+ROOT="${KALSHI_WEATHER_ROOT:-$_AUTO_ROOT_HC}"
 LOG="$ROOT/logs/cron_cycle.log"
 STDERR_CYCLE="$ROOT/logs/launchd_cycle.stderr.log"
 STDERR_SETTLE="$ROOT/logs/launchd_settlements.stderr.log"

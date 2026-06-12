@@ -57,7 +57,7 @@ export KALSHI_API_KEY_ID KALSHI_PRIVATE_KEY_PATH
 #     under a working gate. Returning to $15 as the safer baseline now
 #     that the gate ACTUALLY enforces a ceiling. Revisit after a week of
 #     real-cap data.
-: ${LIVE_DAILY_USD_CAP:=15.0}
+: ${LIVE_DAILY_USD_CAP:=20.0}
 export LIVE_ORDERS_ENABLED LIVE_ORDERS_DRY_RUN LIVE_DAILY_USD_CAP
 
 ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
@@ -90,7 +90,7 @@ write_heartbeat() {
 # strictly above MAX_CYCLE_SECONDS so the lock doesn't release while
 # a cycle is still executing. 960 = MAX_CYCLE_SECONDS + 60s for SIGALRM
 # signal-delivery delay + heartbeat/cleanup overhead.
-LOCK_TTL_SECONDS=960
+LOCK_TTL_SECONDS=1500  # 2026-05-25 PM: bumped to 1500 alongside MAX_CYCLE_SECONDS 1320. Must remain ≥ HARD_CYCLE_KILL (1440) so the lock survives the wrapper's SIGKILL phase, preventing a second cycle from starting before the runaway is fully dead.
 # Atomic-mkdir lock. Replaces the previous "test -f $LOCK_FILE then echo $$ > $LOCK_FILE"
 # pattern (2026-05-18 audit), which is a classic TOCTOU race: two cycles starting
 # within the same millisecond could both see no lock, both write the file, and
@@ -182,18 +182,41 @@ fi
 write_heartbeat "cycle_start"
 echo "[$(ts)] ────── cycle start ──────" >> "$LOG_FILE"
 
-# Ensure Ollama daemon is up for AFD extraction. Non-fatal if it fails —
-# afd_extractor.py degrades gracefully (returns extraction_failed=True).
-if ! curl -sf http://localhost:11434/api/tags >/dev/null 2>&1; then
-  /usr/local/bin/ollama serve >> "$LOG_DIR/ollama.log" 2>&1 &
-  sleep 2
+# 2026-05-23: skip Ollama startup — AFD extraction is disabled (proven
+# noise + dominant cycle cost). Re-enable with ENABLE_AFD_EXTRACTION=1.
+if [[ "${ENABLE_AFD_EXTRACTION:-0}" == "1" ]]; then
+  if ! curl -sf http://localhost:11434/api/tags >/dev/null 2>&1; then
+    /usr/local/bin/ollama serve >> "$LOG_DIR/ollama.log" 2>&1 &
+    sleep 2
+  fi
 fi
 
-# Run city cycle — full output goes to log, with summary at the end
-if "$PY" -m kalshi_weather.tools.run_city_cycle >>"$LOG_FILE" 2>&1; then
+# 2026-05-23: external wall-clock kill. The Python cycle has an internal
+# SIGALRM at MAX_CYCLE_SECONDS but it gets swallowed by C-level blocking
+# HTTP/SQLite calls — a single hung NWS or Kalshi fetch can leave the
+# cycle wedged for tens of minutes (saw 41 min on Mac, 27 min on Lightsail).
+# This wraps the python invocation with a hard SIGKILL at HARD_CYCLE_KILL
+# seconds (default 1000s = MAX_CYCLE + 100s grace).
+HARD_CYCLE_KILL="${HARD_CYCLE_KILL:-1440}"  # 2026-05-25 PM: 1180 → 1440 (MAX_CYCLE 1320 + 120s grace, will drop after parallelization)
+"$PY" -m kalshi_weather.tools.run_city_cycle >>"$LOG_FILE" 2>&1 &
+_PYPID=$!
+(
+  sleep "$HARD_CYCLE_KILL"
+  if kill -0 "$_PYPID" 2>/dev/null; then
+    echo "[$(ts)] ✗ WATCHDOG: cycle pid=$_PYPID exceeded ${HARD_CYCLE_KILL}s wall-clock — SIGKILL" >> "$LOG_FILE"
+    kill -KILL "$_PYPID" 2>/dev/null
+  fi
+) &
+_WDPID=$!
+wait "$_PYPID"
+_PY_EXIT=$?
+# kill the watchdog timer if cycle finished cleanly
+kill "$_WDPID" 2>/dev/null
+wait "$_WDPID" 2>/dev/null
+if [[ $_PY_EXIT -eq 0 ]]; then
   echo "[$(ts)] run_city_cycle OK" >> "$LOG_FILE"
 else
-  echo "[$(ts)] ✗ run_city_cycle FAILED (exit=$?)" >> "$LOG_FILE"
+  echo "[$(ts)] ✗ run_city_cycle FAILED (exit=$_PY_EXIT)" >> "$LOG_FILE"
 fi
 
 # Then refresh the survey report

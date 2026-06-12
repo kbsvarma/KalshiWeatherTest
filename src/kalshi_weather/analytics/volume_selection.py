@@ -42,8 +42,19 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class VolumeSelectionThresholds:
-    # Favorite filter — the heart of the volume-grinder strategy.
-    min_model_probability: Decimal = Decimal("0.70")
+    # Favorite filter — history:
+    #   0.70 (initial) → 0.50 (mid-session) → 0.30 (5/25) → 0.10 (5/28).
+    # Corrected Kalshi-authoritative backtest (5/27) showed the lanes split:
+    #   greater-yes (warm-predicted T-yes):  33% win, +86% ROI  (n=10)
+    #   less-yes   (cool-predicted T-yes):   10% win, -41% ROI  (n=57)
+    # With less-yes structurally blocked in shadow.py + this module's
+    # filter, the floor only gates the proven-profitable greater-yes lane.
+    # 0.30 was over-conservative — the same 5¢-entry far-OTM bets were
+    # the entire reason the bot ever made money in the original 15-bet
+    # sample. Dropping to 0.10 lets through SFO-T67 (p=0.17 +13¢ edge),
+    # DC-T82 (p=0.11 +8¢ edge), and similar warm-prediction longshots
+    # that the corrected backtest validated.
+    min_model_probability: Decimal = Decimal("0.10")
     # Skip near-certain markets (>97%) where fees still eat edge and there's
     # no upside left to grind. Also avoids stranded contracts at $0.98.
     max_model_probability: Decimal = Decimal("0.97")
@@ -65,17 +76,17 @@ class VolumeSelectionThresholds:
     max_provider_spread_f: Decimal = Decimal("10.0")
 
     # Tradability / orderbook quality.
-    min_tradability_score: Decimal = Decimal("0.55")
+    min_tradability_score: Decimal = Decimal("0.40")
 
     # Capital control — daily exposure cap.
     # 2026-05-18 PM: aligned default from $10 → $15 to match the LIVE_DAILY_USD_CAP
     # env var that run_weather_cycle.sh actually exports for live_execution.
     # The mismatch caused survey logs to claim "10.0" cap while live used $15,
     # making cap-related rejection counts in the cycle reports misleading.
-    daily_capital_cap_usd: Decimal = Decimal("15.0")
+    daily_capital_cap_usd: Decimal = Decimal("20.0")
 
     # Minimum confidence: don't bet without basic model trust.
-    min_overall_trade_confidence: Decimal = Decimal("0.35")
+    min_overall_trade_confidence: Decimal = Decimal("0.25")
 
     # Market-disagreement cap — DISABLED 2026-05-16 evening.
     # Was Decimal("0.30") — set to 0.99 to effectively allow all favorite bets
@@ -174,10 +185,53 @@ def _candidate_from_payload(
     provider_spread = Decimal("0")
     if isinstance(forecast_summary, Mapping):
         provider_spread = _decimal(forecast_summary.get("provider_spread_f")) or Decimal("0")
-    if provider_spread > thresholds.max_provider_spread_f:
+    # 2026-05-19 data audit: model_consensus_too_weak gate DISABLED.
+    # Rejected bets would have netted +$7.56 across May 17-19 at 60-86% win rates.
+    # Path engine already incorporates provider spread into posterior PMF.
+    market_ticker_str = str(payload.get("market_ticker") or "")
+    is_between_strike = "-B" in market_ticker_str
+    is_no_side = (side or "").lower() == "no"
+
+    # ── Filter 3a: B-no DISABLED (2026-05-23 data audit) ──────────────────
+    # 33 settled bets: B-no n=27, win 63%, P&L -$0.33, ROI -1.9% (breakeven).
+    # T-yes n=6, win 83%, P&L +$3.47, ROI +227%. Concentrating capital on
+    # T-yes. Re-enable when post-bin-proximity-gate data supports the EV.
+    if is_between_strike and is_no_side:
         return _rejected(payload, side, p_model, market_price, exec_ev, raw_edge,
-                         reason="model_consensus_too_weak",
-                         provider_spread_f=provider_spread)
+                         reason="b_no_structure_disabled")
+
+    # ── Filter 3a2: less-yes DISABLED (2026-05-26 corrected-backtest audit) ──
+    # Kalshi-authoritative backtest: strike_type=less side=yes was 4W/35L
+    # (10% win rate, -$4.61, -34% ROI) — the worst lane by a wide margin.
+    # The bot's p_model overestimates the cool-tail probability; until the
+    # forecast engine's cool-side calibration is fixed (task #16), refuse
+    # T-yes on any "<" or "<=" market. Greater-yes (33% win, +52% ROI) and
+    # B-no after the 5°F gate remain enabled.
+    settlement_op = (payload.get("edge_summary") or {}).get("settlement_operator") or ""
+    if settlement_op in ("<", "<=") and (side or "").lower() == "yes":
+        return _rejected(payload, side, p_model, market_price, exec_ev, raw_edge,
+                         reason="less_yes_lane_disabled")
+
+    # ── Filter 3b: bin-proximity for B-no (≥5°F required) ─────────────────
+    # 2026-05-22 data audit: B-no bets with |threshold − forecast_median|
+    # in the 3-5°F band lost -43% ROI on 12 live trades; only ≥5°F was
+    # profitable. Selector + shadow must stay in lockstep.
+    if is_between_strike and is_no_side and isinstance(forecast_summary, Mapping):
+        pmaxima = forecast_summary.get("provider_maxima_f") or {}
+        try:
+            vals = sorted(float(v) for v in pmaxima.values())
+        except Exception:
+            vals = []
+        if vals:
+            forecast_median = Decimal(str(vals[len(vals)//2]))
+            import re as _re
+            tm = _re.search(r"-B(\d+(?:\.\d+)?)$", market_ticker_str)
+            if tm:
+                threshold = Decimal(tm.group(1))
+                if abs(threshold - forecast_median) < Decimal("5.0"):
+                    return _rejected(payload, side, p_model, market_price, exec_ev, raw_edge,
+                                     reason="b_no_bin_proximity_under_5f",
+                                     provider_spread_f=provider_spread)
 
     # ── Filter 4: tradability ───────────────────────────────────────────────
     micro_summary = payload.get("microstructure_summary")

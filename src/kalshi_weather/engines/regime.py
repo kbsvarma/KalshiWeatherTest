@@ -72,7 +72,18 @@ def build_regime_assessment(
         active_regime = "LATE_DAY_DECAY"
         if remaining_minutes < 60:
             haircut = Decimal("0.40")
-            block_flag = True
+            # 2026-05-28 fix: previously hard-blocked unconditionally when
+            # <60 min remained. That killed 71% of decisions and removed the
+            # entire greater-yes longshot lane (the +86% ROI strategy).
+            # The 40% haircut already discounts EV; p_model itself already
+            # encodes reachability. Only hard-block when BOTH reachability
+            # is genuinely dead AND threshold is meaningfully far — same
+            # conditional logic as the 60-90 min branch, but stricter.
+            block_flag = (
+                path_state.reachability_score <= Decimal("0.30")
+                and path_state.threshold_gap_f >= Decimal("4")
+            )
+            sizing = Decimal("0.70")
         else:
             haircut = Decimal("0.20")
             block_flag = (

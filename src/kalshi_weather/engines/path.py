@@ -299,16 +299,37 @@ def apply_path_adjustment(
     # `threshold_high_f` is set and operator == "between".
     threshold_high = settlement_rule.threshold_high_f
     is_range = settlement_rule.operator == "between" and threshold_high is not None
+
+    # 2026-05-23: Intraday Bayesian update from ASOS observations.
+    # If today's already-observed hours are running warmer/cooler than the
+    # NWS hourly forecast for those same hours, that bias is a posterior
+    # signal — the remaining-day high is likely to inherit it. Apply as a
+    # horizontal shift of the distribution (equivalently: shift the
+    # threshold(s) by the inverse of the bias). Requires >=3 sample hours
+    # for stability; bias is bounded to ±2°F so a single bad obs cannot
+    # dominate. The existing reachability conditioning already neutralizes
+    # the signal when the realized high is locked in.
+    effective_threshold = threshold
+    effective_threshold_high = threshold_high
+    if (current_state.intraday_obs_forecast_bias_f is not None
+            and current_state.intraday_obs_sample_hours is not None
+            and current_state.intraday_obs_sample_hours >= 3):
+        raw_bias = Decimal(str(current_state.intraday_obs_forecast_bias_f))
+        bounded_bias = max(Decimal("-2"), min(Decimal("2"), raw_bias))
+        effective_threshold = threshold - bounded_bias
+        if threshold_high is not None:
+            effective_threshold_high = threshold_high - bounded_bias
+
     for temp, probability in zip(conditioned_distribution.support_temps_f, conditioned_distribution.pmf, strict=False):
         if is_range:
             # Inclusive both ends per Kalshi "between X-Y" rule wording.
-            if threshold <= Decimal(temp) <= threshold_high:
+            if effective_threshold <= Decimal(temp) <= effective_threshold_high:
                 p_yes += probability
         elif settlement_rule.operator in {">", ">="}:
-            if temp > threshold or (temp == threshold and settlement_rule.inclusive_flag):
+            if temp > effective_threshold or (temp == effective_threshold and settlement_rule.inclusive_flag):
                 p_yes += probability
         else:
-            if temp < threshold or (temp == threshold and settlement_rule.inclusive_flag):
+            if temp < effective_threshold or (temp == effective_threshold and settlement_rule.inclusive_flag):
                 p_yes += probability
 
     # T1.2 climatology shrinkage — anchor p_model against 30-year base rate
@@ -420,12 +441,36 @@ def apply_path_adjustment(
     # payload (via path_state) so we can backtest the value of using
     # it before wiring it into the live decision.
 
+    # 2026-05-23: NWS forecast revision-pace as small uncertainty signal.
+    # Empirically (May 22-23) the per-city revision count over 24h ranged
+    # from 3 (Denver, stable regime) to 11 (Chicago/Austin, active regimes).
+    # When NWS has been actively rewriting the forecast all day, the
+    # underlying skill is lower — slight uncertainty bump. Capped to keep
+    # any single signal from dominating.
+    revisions_addon = Decimal("0")
+    if current_state.nws_forecast_revisions_24h is not None:
+        excess = max(0, current_state.nws_forecast_revisions_24h - 5)
+        revisions_addon = min(Decimal("0.03"), Decimal(str(excess)) * Decimal("0.005"))
+
+    # 2026-05-23: GEFS ensemble inter-member std as probabilistic uncertainty
+    # signal. Independent of our own across-model fusion math (GEFS spread
+    # comes from initial-condition perturbations of a single model). Typical
+    # member spread for daily high is 1-3°F in stable regimes, 4-6°F in
+    # transitions. We treat >1.5°F as meaningfully unsettled. Capped at 0.03
+    # to match the other small addons; cannot dominate.
+    gefs_ensemble_addon = Decimal("0")
+    if current_state.gefs_ensemble_std_f is not None:
+        excess_f = max(Decimal("0"), Decimal(str(current_state.gefs_ensemble_std_f)) - Decimal("1.5"))
+        gefs_ensemble_addon = min(Decimal("0.03"), excess_f * Decimal("0.01"))
+
     path_uncertainty_addon = min(
         Decimal("0.25"),
         base_path_uncertainty_addon
         + persistence_uncertainty_addon
         + spc_uncertainty_addon
-        + afd_uncertainty_addon,
+        + afd_uncertainty_addon
+        + revisions_addon
+        + gefs_ensemble_addon,
     )
 
     path_state = PathProgressState(

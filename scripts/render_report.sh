@@ -176,9 +176,84 @@ out.append("")
 if not rows:
     out.append("_No cycles recorded yet today._")
 else:
+    # 2026-05-22: limit the log to the 30 most-recent cycles (newest first).
+    # The full log can run 100+ rows during incident days, dominated by
+    # FAILED entries that have no useful per-cycle data — wrap the table
+    # in a fixed-height scrollable container instead of letting it eat the
+    # whole page.
+    _MAX_LOG_ROWS = 30
+    total_rows = len(rows)
+    # 2026-05-22: drop only pre-recovery NOISE — rows that have NO time anchor
+    # at all (no started_utc, no slot, no recorded_at_utc) AND no reason.
+    # Earlier version was too aggressive — was filtering out legitimate cycle
+    # FAILED rows that have started_utc + recorded_at_utc but null slot.
+    def _is_noise(r):
+        s = r.get("status")
+        if s not in ("FAILED", "MISSED"):
+            return False
+        if r.get("started_utc"):
+            return False  # the cycle actually started — not noise
+        if r.get("slot"):
+            return False
+        if r.get("recorded_at_utc"):
+            return False  # has a timestamp — keep
+        reason = r.get("reason")
+        return not reason or reason == "unknown"
+    rows_clean = [r for r in rows if not _is_noise(r)]
+    noise_dropped = total_rows - len(rows_clean)
+    # Sort newest first by best-available timestamp.
+    def _row_ts(r):
+        return r.get("started_utc") or r.get("recorded_at_utc") or r.get("slot") or ""
+    rows_sorted = sorted(rows_clean, key=_row_ts, reverse=True)
+
+    # 2026-05-22: collapse runs of consecutive FAILED rows with the same
+    # reason into a single roll-up row. Cuts the May-22 chaos burst (13
+    # identical "timed out / aborted" rows) down to one summary entry.
+    rolled = []
+    i = 0
+    while i < len(rows_sorted):
+        r = rows_sorted[i]
+        if r.get("status") == "FAILED":
+            reason_key = (r.get("reason") or "").strip()
+            run = [r]
+            j = i + 1
+            while j < len(rows_sorted) and rows_sorted[j].get("status") == "FAILED" \
+                    and (rows_sorted[j].get("reason") or "").strip() == reason_key:
+                run.append(rows_sorted[j])
+                j += 1
+            if len(run) > 1:
+                first = run[0]
+                last = run[-1]
+                first["_count"] = len(run)
+                first["_span_first_ts"] = last.get("started_utc") or last.get("recorded_at_utc")
+                first["_span_last_ts"] = first.get("started_utc") or first.get("recorded_at_utc")
+            rolled.append(r)
+            i = j
+        else:
+            rolled.append(r)
+            i += 1
+
+    rows_display = rolled[:_MAX_LOG_ROWS]
+    truncated = max(0, len(rolled) - len(rows_display))
+    coalesced = len(rows_sorted) - len(rolled)
+    header_bits = []
+    header_bits.append(f"Showing {len(rows_display)} entries of {len(rows_clean)} cycles today")
+    if coalesced > 0:
+        header_bits.append(f"{coalesced} duplicate FAILED rows coalesced")
+    if truncated > 0:
+        header_bits.append(f"{truncated} older entries hidden")
+    if noise_dropped > 0:
+        header_bits.append(f"{noise_dropped} pre-recovery noise rows suppressed")
+    out.append(f"_{'; '.join(header_bits)}._")
+    out.append("")
+    # ``markdown="1"`` lets python-markdown's md_in_html extension keep
+    # parsing markdown (the table) inside this HTML block — without it
+    # the div would be treated as raw HTML and the table left as plain text.
+    out.append("<div markdown=\"1\" style=\"max-height: 480px; overflow-y: auto; border: 1px solid var(--kxw-border, #e5e7eb); border-radius: 6px; padding: 4px 12px;\">")
+    out.append("")
     out.append("| Time (ET) | Status | Markets | Cand. | Selected | Fills | Live | Notes |")
     out.append("|:--|:--|--:|--:|--:|--:|--:|:--|")
-    for r in rows:
+    for r in rows_display:
         status = r.get("status", "?")
         if status == "OK":
             badge = "✅ OK"
@@ -192,34 +267,65 @@ else:
             note = ", ".join(tickers) if tickers else "no selections"
             out.append(f"| {t} | {badge} | {mkt} | {cand} | {sel} | {fills} | {live} | {note} |")
         elif status == "FAILED":
-            badge = "❌ FAILED"
-            t = r.get("slot", "—")
-            reason = (r.get("reason") or "unknown").replace("|", "\\|")[:140]
+            count = r.get("_count", 1)
+            badge = f"❌ FAILED ×{count}" if count > 1 else "❌ FAILED"
+            # Time: when rolled up, show the span "FIRST → LAST"; else just the cycle time
+            if count > 1:
+                t_first = to_et(r.get("_span_first_ts", "")) or "—"
+                t_last = to_et(r.get("_span_last_ts", "")) or "—"
+                t = f"{t_first} → {t_last}"
+            else:
+                t = to_et(r.get("started_utc", "")) or r.get("slot") or to_et(r.get("recorded_at_utc", "")) or "—"
+            reason = (r.get("reason") or "timed out / aborted").replace("|", "\\|").replace("\n", " ").replace("\r", " ")[:140]
             out.append(f"| {t} | {badge} | — | — | — | — | — | {reason} |")
         elif status == "MISSED":
             badge = "⚠️ MISSED"
-            t = r.get("slot", "—")
-            reason = (r.get("reason") or "unknown").replace("|", "\\|")[:140]
+            t = r.get("slot") or to_et(r.get("recorded_at_utc", "")) or "—"
+            reason = (r.get("reason") or "unknown").replace("|", "\\|").replace("\n", " ").replace("\r", " ")[:140]
             out.append(f"| {t} | {badge} | — | — | — | — | — | {reason} |")
         else:
             t = r.get("slot") or to_et(r.get("recorded_at_utc", ""))
-            reason = (r.get("reason") or "—").replace("|", "\\|")[:140]
+            reason = (r.get("reason") or "—").replace("|", "\\|").replace("\n", " ").replace("\r", " ")[:140]
             out.append(f"| {t} | ⚪ {status} | — | — | — | — | — | {reason} |")
+    out.append("")
+    out.append("</div>")
 
-# Detail blocks for any failures + the most recent OK cycle's rejection breakdown
+# Detail blocks for any failures + the most recent OK cycle's rejection breakdown.
+# 2026-05-22: incidents are coalesced by reason + capped at 20 most-recent to
+# avoid 50+ duplicate "unknown" blocks blowing up the report.
 failures = [r for r in rows if r.get("status") in ("FAILED", "MISSED")]
 if failures:
+    # Group by (status, reason). Show count + first/last occurrence times.
+    from collections import Counter, defaultdict
+    grouped = defaultdict(list)
+    for r in failures:
+        key = (r.get("status","?"), (r.get("reason") or "unknown")[:120])
+        grouped[key].append(r)
+    incident_summary = sorted(grouped.items(), key=lambda kv: -len(kv[1]))
+    total_failures = len(failures)
+    distinct_reasons = len(grouped)
+
     out.append("")
     out.append("---")
     out.append("")
-    out.append("## Incident Detail")
+    out.append(f"## Incident Detail — {total_failures} failures / {distinct_reasons} distinct reasons")
     out.append("")
-    for r in failures:
-        out.append(f"**{r.get('slot','?')} — {r.get('status','?')}**")
-        out.append("")
-        out.append(f"- Reason: `{r.get('reason','unknown')}`")
-        out.append(f"- Recorded: {to_et(r.get('recorded_at_utc',''))} ET")
-        out.append("")
+    out.append("<div markdown=\"1\" style=\"max-height: 360px; overflow-y: auto; border: 1px solid var(--kxw-border, #e5e7eb); border-radius: 6px; padding: 4px 12px;\">")
+    out.append("")
+    out.append("| Status | Reason | Count | First (ET) | Last (ET) |")
+    out.append("|:--|:--|--:|:--|:--|")
+    for (status, reason), incidents in incident_summary[:30]:
+        times = sorted(to_et(i.get("recorded_at_utc","")) for i in incidents if i.get("recorded_at_utc"))
+        first_t = times[0] if times else "—"
+        last_t = times[-1] if times else "—"
+        badge = {"FAILED":"❌","MISSED":"⚠️"}.get(status,"⚪") + " " + status
+        reason_disp = reason.replace("|","\\|").replace("\n", " ").replace("\r", " ")
+        out.append(f"| {badge} | `{reason_disp}` | {len(incidents)} | {first_t} | {last_t} |")
+    if len(incident_summary) > 30:
+        out.append(f"| _…and {len(incident_summary)-30} more reasons_ | | | | |")
+    out.append("")
+    out.append("</div>")
+    out.append("")
 
 last_ok = next((r for r in reversed(rows) if r.get("status") == "OK"), None)
 if last_ok and last_ok.get("top_rejection_reasons"):

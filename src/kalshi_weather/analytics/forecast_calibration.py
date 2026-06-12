@@ -43,10 +43,15 @@ def _forecast_day_max(
         for temp, valid_time in zip(snapshot.hourly_temp_path_f, snapshot.valid_for_times, strict=False)
         if _to_local_date(valid_time, timezone_name) == run_date
     ]
-    if not samples:
-        samples = list(zip(snapshot.hourly_temp_path_f, snapshot.valid_for_times, strict=False))
-    if not samples and snapshot.hourly_temp_path_f:
-        samples = [(max(snapshot.hourly_temp_path_f), snapshot.provider_run_time)]
+    # 2026-05-25 bugfix: removed the silent fallback that re-used all hours
+    # of the path (or the bare max) when no run-date-aligned hours existed.
+    # Same shape as the build_forecast_distribution bug fixed earlier today:
+    # for Open-Meteo's rolling 3-day forecasts, a forecast fetched at 11 PM
+    # local can have its earliest covered hour be the next day, leaving zero
+    # run-date samples — the fallback then computed max() over irrelevant
+    # next-day hours and reported it as the "run-date forecast", which
+    # polluted the calibration with garbage. Returning None when no in-day
+    # samples exist makes the calibration honestly skip that snapshot.
     if not samples:
         return None
     predicted_max, max_valid_time = max(samples, key=lambda sample: sample[0])
@@ -392,5 +397,18 @@ def extract_provider_bias_adjustments(
             bias = Decimal(str(source_report.get("mean_bias_f")))
         except Exception:
             continue
-        results[provider_id] = max(Decimal("-1.5"), min(Decimal("1.5"), bias))
+        # 2026-05-27 root-cause fix: previously clamped ±1.5°F. Empirically
+        # measured biases (n=4.7M samples per OM provider) show actual
+        # cool biases of −2 to −7°F (median −3 to −7°F by provider). The
+        # 1.5°F cap applied 1/4 to 1/5 of the needed correction, leaving
+        # the blended ensemble max ~5.6°F cool — the root cause of the
+        # less-yes lane disaster (4W/35L, −$4.61).
+        # ±3°F chosen as middle-ground after a simulation showed ±6°F
+        # overcorrects late-day forecasts (which have already converged
+        # to reality, so applying full global bias overshoots warm).
+        # Captures ~70% of the average correction needed for early-day
+        # forecasts (when bias is largest) while limiting overshoot for
+        # late-day forecasts. The proper fix is per-lead-bucket bias
+        # rather than a global clamp — tracking in task #18 follow-up.
+        results[provider_id] = max(Decimal("-3"), min(Decimal("3"), bias))
     return results

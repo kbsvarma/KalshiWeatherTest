@@ -226,6 +226,12 @@ def build_current_state_estimate(
     afd_model_spread_flag: bool | None = None,
     afd_regime: str | None = None,
     afd_mentioned_today_high_f: int | None = None,
+    nws_forecast_revisions_24h: int | None = None,
+    gefs_ensemble_std_f: float | None = None,
+    gefs_ensemble_mean_f: float | None = None,
+    gefs_ensemble_member_count: int | None = None,
+    intraday_obs_forecast_bias_f: float | None = None,
+    intraday_obs_sample_hours: int | None = None,
 ) -> CurrentStateEstimate:
     if not observations:
         raise ValueError("observations are required")
@@ -418,4 +424,10 @@ def build_current_state_estimate(
         afd_model_spread_flag=afd_model_spread_flag,
         afd_regime=afd_regime,
         afd_mentioned_today_high_f=afd_mentioned_today_high_f,
+        nws_forecast_revisions_24h=nws_forecast_revisions_24h,
+        gefs_ensemble_std_f=gefs_ensemble_std_f,
+        gefs_ensemble_mean_f=gefs_ensemble_mean_f,
+        gefs_ensemble_member_count=gefs_ensemble_member_count,
+        intraday_obs_forecast_bias_f=intraday_obs_forecast_bias_f,
+        intraday_obs_sample_hours=intraday_obs_sample_hours,
     )

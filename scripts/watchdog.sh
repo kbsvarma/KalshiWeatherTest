@@ -166,7 +166,42 @@ if [[ "$slot_ran" == "yes" ]]; then
   exit 0
 fi
 
-# Slot did NOT run. Determine reason from launchd stderr.
+# Slot did NOT run. Before classifying as FAILED, check whether the wrapper
+# DID fire for this slot but intentionally skipped due to lock-held or
+# cooldown. Those are legitimate skips, not failures.
+#
+# 2026-05-23: false-FAILED at 2:00 PM ET happened because the 1:58 manual
+# cycle was still running when the scheduled 2:00 slot fired. The wrapper
+# logged "another cycle holds lock — skipping" and exited 0. The watchdog
+# saw launchd exit=0 with no "cycle end" and marked it FAILED.
+CRON_LOG="$ROOT/logs/cron_cycle.log"
+if [[ -f "$CRON_LOG" ]]; then
+  # Look at the last 30 lines for a skip that landed in this slot's window.
+  # Slot window = slot_epoch ± 90s (launchd jitter + clock skew).
+  slot_window_start=$(( slot_epoch - 90 ))
+  slot_window_end=$(( slot_epoch + 90 ))
+  if tail -30 "$CRON_LOG" | python3 -c "
+import sys, re, datetime
+ws, we = ${slot_window_start}, ${slot_window_end}
+for line in sys.stdin:
+    m = re.match(r'\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})Z\]', line)
+    if not m:
+        continue
+    if 'skipping' not in line:
+        continue
+    try:
+        t = int(datetime.datetime.strptime(m.group(1), '%Y-%m-%dT%H:%M:%S').replace(tzinfo=datetime.timezone.utc).timestamp())
+    except Exception:
+        continue
+    if ws <= t <= we:
+        sys.exit(0)  # found a skip in this slot's window
+sys.exit(1)
+" 2>/dev/null; then
+    echo "[$(ts)] slot=$slot_et SKIPPED (wrapper skipped via lock/cooldown — not a failure)" >> "$WATCH_LOG"
+    exit 0
+  fi
+fi
+
 # Look at the last line of stderr; if recent, that's the failure.
 reason="unknown"
 if [[ -f "$STDERR_CYCLE" ]]; then
@@ -182,7 +217,12 @@ fi
 # Darwin: launchctl. Linux: systemd via `systemctl show` on the cycle unit
 # (whichever name the install used — try both).
 if _is_darwin; then
-  exit_code=$(launchctl list 2>/dev/null | grep com.varmakammili.kalshi.weather.cycle | awk '{print $2}')
+  # 2026-05-28: pin to the PRIMARY cycle agent (exact match) so that
+  # when the backup agent is also loaded we don't get a multi-line
+  # exit-code that breaks downstream rendering (e.g., "0\n0" → reason
+  # field carries a stray newline → dashboard cycle log renders an
+  # orphan row reading just "0)" between the real rows).
+  exit_code=$(launchctl list 2>/dev/null | awk '$3=="com.varmakammili.kalshi.weather.cycle"{print $2; exit}')
   if [[ -n "$exit_code" && "$exit_code" != "0" && "$exit_code" != "-" ]]; then
     reason="${reason} (launchd exit=${exit_code})"
   fi

@@ -27,7 +27,14 @@ from pathlib import Path
 from typing import Iterable
 
 
-MIN_SAMPLES_FOR_CALIBRATION = 50
+# 2026-05-19: raised 50 → 2000 after the 120-sample fit produced a
+# 9-bin step function that snapped every live p_yes to ~0.21-0.40 for
+# two days, blocking the favorite-floor gate on all B-markets and
+# stopping ~80% of trading. Symptom file: data/derived/isotonic_model.json.bad.
+# Until we have ≥2000 (predicted, outcome) pairs the calibration is
+# forced to identity. Need a less brittle calibrator (fixed-resolution
+# logistic etc.) before re-enabling under any lower threshold.
+MIN_SAMPLES_FOR_CALIBRATION = 2000
 DEFAULT_CACHE_PATH = Path("data/derived/isotonic_model.json")
 # Bot underwent substantial changes on 2026-05-17 (T1.2 climatology prior,
 # T1.3 persistence baseline, portfolio_risk_limit fix, spread cap raise,

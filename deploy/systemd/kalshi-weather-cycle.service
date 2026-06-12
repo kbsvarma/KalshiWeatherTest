@@ -29,7 +29,7 @@ Environment=OLLAMA_TIMEOUT_SECONDS=90
 # overrides these without modifying this base unit.
 Environment=LIVE_ORDERS_ENABLED=0
 Environment=LIVE_ORDERS_DRY_RUN=1
-Environment=LIVE_DAILY_USD_CAP=15.0
+Environment=LIVE_DAILY_USD_CAP=20.0
 ExecStart=/usr/bin/env bash __INSTALL_DIR__/scripts/run_weather_cycle.sh
 TimeoutStartSec=20min
 Nice=10

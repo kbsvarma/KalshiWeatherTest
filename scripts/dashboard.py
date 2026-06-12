@@ -202,16 +202,40 @@ def load_open_positions() -> pd.DataFrame:
         # closed out. Exclude those via NOT IN.
         # Bug found 2026-05-18 PM audit (was inflating dashboard open count
         # by the 6 currently-closed positions).
-        live_rows = conn.execute(
+        # 2026-05-23: query all currently-open positions (placed any day),
+        # then filter to those whose settlement date is today or later.
+        # Prior query was "placed today only" — hid multi-day positions.
+        import re as _re
+        def _parse_settle(tkr: str):
+            m = _re.search(r"-(\d{2})([A-Z]{3})(\d{2})-", tkr)
+            if not m:
+                return None
+            yy, mon, dd = m.groups()
+            mp = {"JAN":1,"FEB":2,"MAR":3,"APR":4,"MAY":5,"JUN":6,
+                  "JUL":7,"AUG":8,"SEP":9,"OCT":10,"NOV":11,"DEC":12}
+            try:
+                return datetime(2000 + int(yy), mp[mon], int(dd)).date()
+            except Exception:
+                return None
+        # 2026-05-24 00:09: widened from `sd >= today` to `sd >= today - 1`
+        # so same-day-settling positions (which Kalshi still reports as
+        # OPEN until their settlement job runs, often hours after midnight
+        # ET) remain visible in the table. The 2-day window still excludes
+        # the ~27 zombie rows from May 17–18 that were never reconciled.
+        today_date = datetime.now(ET).date()
+        min_settle = today_date - timedelta(days=1)
+        raw_rows = conn.execute(
             "SELECT market_ticker, payload_json, status, created_at "
             "FROM live_orders WHERE status='PLACED_EXECUTED' "
-            "AND substr(created_at, 1, 10) = ? "
             "AND market_ticker NOT IN ("
             "  SELECT market_ticker FROM live_orders WHERE status LIKE 'CLOSED_%'"
             ") "
             "ORDER BY created_at",
-            (_today_et_iso(),),
         ).fetchall()
+        live_rows = [
+            r for r in raw_rows
+            if (sd := _parse_settle(r[0])) is not None and sd >= min_settle
+        ]
         positions = []
         for ticker, payload_raw, status, created_at in live_rows:
             try:
@@ -272,12 +296,104 @@ def load_open_positions() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=30)
+def load_closed_positions(*, days: int = 7) -> pd.DataFrame:
+    """Return positions the bot has closed early (status LIKE 'CLOSED_%').
+
+    Joined back to the matching opening order to compute realized PnL
+    in cents. Includes ``close_reason`` from exit_metadata so the user
+    can see *why* the bot chose to close (typically
+    ``underwater_exit_signal``). Default lookback 7 days — there are
+    only ~13 closes in bot history, so this list is short.
+    Added 2026-05-23 at user request.
+    """
+    conn = _ro_connect()
+    if conn is None:
+        return pd.DataFrame()
+    try:
+        cutoff = (datetime.now(ET) - timedelta(days=days)).isoformat()
+        rows = conn.execute(
+            "SELECT market_ticker, created_at, status, payload_json "
+            "FROM live_orders WHERE status LIKE 'CLOSED_%' "
+            "AND created_at >= ? "
+            "ORDER BY created_at DESC",
+            (cutoff,),
+        ).fetchall()
+        records = []
+        for ticker, created_at, status, payload_raw in rows:
+            try:
+                close_p = json.loads(payload_raw)
+            except Exception:
+                continue
+            # Find the opening order for this ticker (latest PLACED row
+            # before the close timestamp) so we can compute realized PnL.
+            opener = conn.execute(
+                "SELECT payload_json FROM live_orders "
+                "WHERE market_ticker = ? AND status='PLACED_EXECUTED' "
+                "AND created_at < ? ORDER BY created_at DESC LIMIT 1",
+                (ticker, created_at),
+            ).fetchone()
+            entry_c = exit_c = qty = 0
+            side_held = (close_p.get("side") or "").lower()
+            if opener:
+                try:
+                    op = json.loads(opener[0])
+                    qty = int(op.get("count") or op.get("quantity") or 0)
+                    # Entry price = price we paid for the side we hold
+                    if side_held == "yes":
+                        entry_c = int(op.get("yes_price") or 0)
+                    elif side_held == "no":
+                        entry_c = int(op.get("no_price") or 0)
+                    else:
+                        entry_c = int(op.get("yes_price") or op.get("no_price") or 0)
+                except Exception:
+                    pass
+            # Exit price = price we sold our held side for. In a close
+            # the payload stores both yes_price and no_price (they sum
+            # to 100). We want the one matching the side we held.
+            try:
+                if side_held == "yes":
+                    exit_c = int(close_p.get("yes_price") or 0)
+                elif side_held == "no":
+                    exit_c = int(close_p.get("no_price") or 0)
+                else:
+                    exit_c = int(close_p.get("yes_price") or close_p.get("no_price") or 0)
+            except Exception:
+                exit_c = 0
+            # Realized PnL per contract = sell_price - buy_price (cents).
+            pnl_c = (exit_c - entry_c) * max(1, qty)
+            try:
+                ca_et = datetime.fromisoformat(created_at.replace("Z", "+00:00")).astimezone(ET)
+                ca_str = ca_et.strftime("%a %b %-d %-I:%M %p")
+            except Exception:
+                ca_str = created_at[:19]
+            exit_meta = close_p.get("exit_metadata") or {}
+            reason = exit_meta.get("close_reason") if isinstance(exit_meta, dict) else None
+            records.append({
+                "Closed (ET)": ca_str,
+                "Ticker": ticker,
+                "Side Held": side_held.upper(),
+                "Entry ¢": entry_c,
+                "Exit ¢": exit_c,
+                "Qty": qty,
+                "Realized P&L $": f"{(pnl_c/100.0):+.2f}",
+                "Reason": reason or "—",
+                "Status": status,
+            })
+        return pd.DataFrame(records)
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+
+@st.cache_data(ttl=30)
 def load_today_metrics() -> dict:
     """Aggregate metrics for the header cards."""
     conn = _ro_connect()
     out = {
         "avg_spread_f": None,
         "open_count": 0,
+        "opened_today_count": 0,
         "deployed_usd": 0.0,
         "wins": 0,
         "losses": 0,
@@ -297,18 +413,44 @@ def load_today_metrics() -> dict:
         spreads = [float(r[0]) for r in rows if r[0] is not None]
         if spreads:
             out["avg_spread_f"] = statistics.median(spreads)
-        # Open positions only: placed today AND not already closed via a
-        # subsequent close-order row. Same NOT IN filter as in the table
-        # display. See bug audit 2026-05-18 PM.
-        live = conn.execute(
-            "SELECT payload_json FROM live_orders WHERE status='PLACED_EXECUTED' "
-            "AND substr(created_at, 1, 10) = ? "
+        # Open positions: any PLACED_EXECUTED row whose settlement date
+        # is today or later AND not already closed via a subsequent
+        # close-order row. Prior behavior filtered to "placed today only",
+        # which hid multi-day positions and made the metric misleading
+        # (showed 20 when 21+ were actually open). Fixed 2026-05-23.
+        # The settlement-date filter (vs no filter) excludes stale rows
+        # for markets that already settled but were never marked closed.
+        import re as _re
+        def _parse_settle(tkr: str):
+            m = _re.search(r"-(\d{2})([A-Z]{3})(\d{2})-", tkr)
+            if not m:
+                return None
+            yy, mon, dd = m.groups()
+            mp = {"JAN":1,"FEB":2,"MAR":3,"APR":4,"MAY":5,"JUN":6,
+                  "JUL":7,"AUG":8,"SEP":9,"OCT":10,"NOV":11,"DEC":12}
+            try:
+                return datetime(2000 + int(yy), mp[mon], int(dd)).date()
+            except Exception:
+                return None
+        today_date = datetime.now(ET).date()
+        live_rows = conn.execute(
+            "SELECT market_ticker, payload_json, created_at FROM live_orders "
+            "WHERE status='PLACED_EXECUTED' "
             "AND market_ticker NOT IN ("
             "  SELECT market_ticker FROM live_orders WHERE status LIKE 'CLOSED_%'"
             ")",
-            (today,),
         ).fetchall()
+        live: list[tuple[str]] = []
+        opened_today = 0
+        for ticker, raw, ca in live_rows:
+            sd = _parse_settle(ticker)
+            if sd is None or sd < today_date:
+                continue  # stale (already-settled) row
+            live.append((raw,))
+            if isinstance(ca, str) and ca[:10] == today:
+                opened_today += 1
         out["open_count"] = len(live)
+        out["opened_today_count"] = opened_today
         for (raw,) in live:
             try:
                 p = json.loads(raw)
@@ -993,8 +1135,17 @@ cards_html = (
                    f"{cycles_today['started']} started")
     + _metric_html("AVG SPREAD °F", avg_spread_str, "forecast disagreement")
     + _metric_html("BOT HEARTBEAT", hb_value, hb_sub)
-    + _metric_html("OPEN POSITIONS", str(metrics["open_count"]),
-                   f"${metrics['deployed_usd']:.2f} deployed")
+    + _metric_html(
+        "OPEN POSITIONS",
+        # Authoritative count comes from Kalshi's positions API (the
+        # account snapshot). The local DB-derived count under-reports
+        # at midnight when same-day-settling markets are mid-settlement,
+        # and over-reports if shadow reconciliation lags. Fall back to
+        # the local count only when the Kalshi API call failed.
+        str(acct.get("open_positions") if "error" not in acct else metrics["open_count"]),
+        f"{metrics.get('opened_today_count', 0)} opened today · "
+        f"${metrics['deployed_usd']:.2f} deployed",
+    )
     + _metric_html(
         "NET P&L TODAY",
         pnl_str,
@@ -1190,7 +1341,7 @@ def _render_report_card(report_md: str) -> None:
         cleaned_lines.append(line)
     cleaned = "\n".join(cleaned_lines).strip()
     html_body = md_lib.markdown(
-        cleaned, extensions=["tables", "fenced_code", "sane_lists"]
+        cleaned, extensions=["tables", "fenced_code", "sane_lists", "md_in_html"]
     )
     st.markdown(
         f"<div class='kxw-report-card'><div class='kxw-report-wrap'>"
@@ -1273,6 +1424,13 @@ with tab_session:
             ["Ticker", "Side", "Entry", "Current Bid", "P&L $", "Engine", "Status"]
         ]
         _html_table(display_df, color_cols={"P&L $": "pnl", "Status": "status"})
+
+    _section("Closed by bot — last 7 days")
+    closed_df = load_closed_positions(days=7)
+    if closed_df.empty:
+        _empty("Bot has not closed any positions in the last 7 days.")
+    else:
+        _html_table(closed_df, color_cols={"Realized P&L $": "pnl"})
 
     _section("Decision breakdown — today")
     breakdown = load_decision_breakdown_today()

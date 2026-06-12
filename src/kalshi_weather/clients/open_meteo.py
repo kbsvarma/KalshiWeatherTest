@@ -178,6 +178,95 @@ class OpenMeteoClient:
                 }
         return None
 
+    def fetch_gefs_ensemble_high(
+        self,
+        *,
+        latitude: float,
+        longitude: float,
+        timezone_name: str,
+    ) -> dict | None:
+        """Return GEFS ensemble (~31 members) daily-high stats for today.
+
+        Calls Open-Meteo's ensemble-api endpoint with model=gfs_seamless,
+        which returns 30 perturbation members + 1 control. We compute the
+        per-member maximum temperature over today's local hours and return
+        ``{members: [floats], mean: float, std: float, count: int, target_date: iso}``
+        — or None on any failure (caller must gracefully degrade).
+
+        The inter-member std is a true probabilistic uncertainty signal,
+        complementing our own across-model fusion math. Free, no auth.
+        Subject to the same Open-Meteo per-IP rate limit pool as
+        ``fetch_ensemble`` and ``fetch_soil_moisture`` — uses the same
+        process-wide circuit breaker.
+        """
+        import statistics
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        if _circuit_is_open():
+            return None
+        params = {
+            "latitude": f"{latitude}",
+            "longitude": f"{longitude}",
+            "hourly": "temperature_2m",
+            "models": "gfs_seamless",
+            "forecast_days": "2",
+            "timezone": timezone_name,
+            "temperature_unit": "fahrenheit",
+        }
+        try:
+            payload = http_get_json(
+                "https://ensemble-api.open-meteo.com/v1/ensemble",
+                params=params,
+            )
+        except HttpRequestError as exc:
+            if getattr(exc, "status_code", None) == 429 or "429" in str(exc):
+                _trip_circuit(reason=f"gefs_ensemble_429 lat={latitude}")
+            return None
+        except Exception:
+            return None
+        if not isinstance(payload, Mapping):
+            return None
+        hourly = payload.get("hourly") or {}
+        times = hourly.get("time") or []
+        if not times:
+            return None
+        # Filter to today's local-date hours (city's timezone)
+        try:
+            local_today = datetime.now(ZoneInfo(timezone_name)).date().isoformat()
+        except Exception:
+            return None
+        today_indices = [
+            i for i, t in enumerate(times)
+            if isinstance(t, str) and t.startswith(local_today)
+        ]
+        if not today_indices:
+            return None
+        # Member keys: temperature_2m (control), temperature_2m_member01..30
+        member_keys = [
+            k for k in hourly.keys()
+            if k == "temperature_2m" or k.startswith("temperature_2m_member")
+        ]
+        per_member_highs: list[float] = []
+        for key in member_keys:
+            series = hourly.get(key) or []
+            if not isinstance(series, list):
+                continue
+            today_vals = [
+                series[i] for i in today_indices
+                if i < len(series) and isinstance(series[i], (int, float))
+            ]
+            if today_vals:
+                per_member_highs.append(float(max(today_vals)))
+        if len(per_member_highs) < 5:  # need a meaningful sample
+            return None
+        return {
+            "members": per_member_highs,
+            "mean": float(statistics.mean(per_member_highs)),
+            "std": float(statistics.pstdev(per_member_highs)),
+            "count": len(per_member_highs),
+            "target_date": local_today,
+        }
+
     def __init__(self, *, models: tuple[str, ...] | None = None, forecast_days: int = 3) -> None:
         # Use API model identifiers (e.g. "gfs_global"), not our internal provider ids.
         self.models = tuple(models) if models else tuple(api_id for api_id, _, _ in OPEN_METEO_MODELS)

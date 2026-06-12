@@ -51,7 +51,11 @@ def http_request_text(
     params: Mapping[str, Any] | None = None,
     headers: Mapping[str, str] | None = None,
     payload: Mapping[str, Any] | str | bytes | None = None,
-    timeout_seconds: int = 20,
+    # 2026-05-23: dropped 20→8 sec. With 3 attempts + backoff the worst-case
+    # per endpoint is 8+0.5+8+1+8 = ~25s vs the old ~62s. With ~50 HTTP calls
+    # per cycle across providers, the old budget could plausibly compound to
+    # the 41-min hang observed on Mac.
+    timeout_seconds: int = 8,
     max_attempts: int = 3,
     backoff_base_seconds: float = 0.5,
     sleep_fn: Callable[[float], None] | None = None,

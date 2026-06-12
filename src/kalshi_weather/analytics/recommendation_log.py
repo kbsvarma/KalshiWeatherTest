@@ -30,7 +30,7 @@ from kalshi_weather.storage.state_store import SQLiteStateStore
 # engines/shadow.py and analytics/volume_selection.py after the bug audit
 # found three-way drift. Same logical concept, three different numbers.
 # Keep these in sync — see notes/volume_grinder_thresholds.md.
-_FAVORITE_MIN_P = Decimal("0.70")
+_FAVORITE_MIN_P = Decimal("0.10")  # 2026-05-28: 0.30 → 0.10, lockstep with volume_selection.py + shadow.py
 _FAVORITE_MAX_P = Decimal("0.97")
 _MAX_SPREAD_F = Decimal("10.0")          # was 8.0 — drifted from shadow=10
 _MIN_EXEC_EV = Decimal("0.005")

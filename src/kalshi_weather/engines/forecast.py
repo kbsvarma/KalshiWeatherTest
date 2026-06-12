@@ -300,14 +300,48 @@ def build_forecast_distribution(
         getattr(settlement_rule, "settlement_variable", None)
         == "daily_low_temperature_f"
     )
+    # 2026-05-24 bugfix: pre-filter snapshots to those whose forecast
+    # actually covers the settlement window. Prior behavior fell back to
+    # `list(snapshot.hourly_temp_path_f)` (the full 3-day path) when no
+    # in-window hours existed, silently producing garbage values — for
+    # Open-Meteo's rolling 3-day forecasts, as soon as the target day
+    # rolled off the back, the fallback took max() over irrelevant future
+    # days. The 7-day MAE analysis showed OM providers jumping from ~2°F
+    # (in-window) to ~8°F (post-window), an artifact of this fallback.
+    # GraphCast notably has a 48-72h horizon and routinely fails to
+    # cover next-day markets — pre-this-fix, it contributed garbage; now
+    # it correctly drops out. Three subsequent loops over `snapshots` all
+    # index `provider_maxima_f[snapshot.provider_id]`, so filtering once
+    # here is the only correct place — looping with `continue` would
+    # KeyError downstream.
+    filtered_snapshots: list = []
+    for snapshot in snapshots:
+        has_window = any(
+            settlement_rule.local_standard_window_start <= valid_for <= settlement_rule.local_standard_window_end
+            for valid_for in snapshot.valid_for_times
+        )
+        if has_window:
+            filtered_snapshots.append(snapshot)
+        else:
+            print(f"[FORECAST] skipping {snapshot.provider_id}: "
+                  f"forecast does not cover settlement window "
+                  f"[{settlement_rule.local_standard_window_start} → "
+                  f"{settlement_rule.local_standard_window_end}]")
+    if not filtered_snapshots:
+        raise ValueError(
+            "no provider forecast covers the settlement window "
+            f"[{settlement_rule.local_standard_window_start} → "
+            f"{settlement_rule.local_standard_window_end}] — "
+            "this market may have already settled or the forecast cache is stale"
+        )
+    snapshots = filtered_snapshots
+
     for snapshot in snapshots:
         window_values = [
             temp
             for temp, valid_for in zip(snapshot.hourly_temp_path_f, snapshot.valid_for_times, strict=False)
             if settlement_rule.local_standard_window_start <= valid_for <= settlement_rule.local_standard_window_end
         ]
-        if not window_values:
-            window_values = list(snapshot.hourly_temp_path_f)
         provider_max = min(window_values) if is_low_market else max(window_values)
         provider_max += _provider_bias_adjustment(
             snapshot,
@@ -386,6 +420,21 @@ def build_forecast_distribution(
             else None
         )
         sigma_down, sigma_up = _threshold_skew_sigmas(float(sigma), threshold_distance)
+        # 2026-05-26 Fix A — overconfidence compression.
+        # Audit of 44 settled less-yes bets showed p_yes bucket [0.85, 0.97]
+        # had a 19% empirical win rate vs ~86% expected — severe under-spread
+        # in the PMF tails. Realized highs averaged +2.0°F vs the threshold
+        # (cool bias in either the mean or sigma). Multiply both sigmas by
+        # _SIGMA_INFLATION (1.4) so extreme p_yes values from a single
+        # provider compress toward 0.7 instead of 0.95+. The skew direction
+        # from _threshold_skew_sigmas is preserved.
+        # NB: this is a stopgap for the immediate bleed. The real fix is
+        # to correct the underlying ~2°F cold bias in mean predictions
+        # (climatology recency + per-direction provider bias). Tracking
+        # in task #16 follow-up work.
+        _SIGMA_INFLATION = 1.4
+        sigma_down *= _SIGMA_INFLATION
+        sigma_up *= _SIGMA_INFLATION
         pmf = _asymmetric_gaussian_pmf(
             mean=float(provider_maxima_f[snapshot.provider_id]),
             sigma_down=sigma_down,
