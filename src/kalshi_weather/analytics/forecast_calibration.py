@@ -45,14 +45,25 @@ def _forecast_day_max(
     ]
     # 2026-05-25 bugfix: removed the silent fallback that re-used all hours
     # of the path (or the bare max) when no run-date-aligned hours existed.
-    # Same shape as the build_forecast_distribution bug fixed earlier today:
-    # for Open-Meteo's rolling 3-day forecasts, a forecast fetched at 11 PM
-    # local can have its earliest covered hour be the next day, leaving zero
-    # run-date samples — the fallback then computed max() over irrelevant
-    # next-day hours and reported it as the "run-date forecast", which
-    # polluted the calibration with garbage. Returning None when no in-day
-    # samples exist makes the calibration honestly skip that snapshot.
+    # Returning None when no in-day samples exist makes the calibration
+    # honestly skip that snapshot.
     if not samples:
+        return None
+    # 2026-06-12 bugfix (the REAL root cause of the phantom cool bias):
+    # partial-coverage poisoning. A forecast fetched at 9 PM local has
+    # run-date hours 21:00-23:00 only — its "day max" is the evening temp,
+    # which sits 5-10°F below the actual afternoon peak. Comparing that to
+    # the observed full-day max produced phantom "cool bias" of −5 to −7°F
+    # per provider, which (clamped) over-warmed live forecasts. Measured
+    # against 468 settled city-days with peak-coverage enforced, true
+    # biases are only −0.5 to −1.3°F for most providers.
+    # Require the run-date path to bracket the typical heating peak:
+    # earliest sample ≤ 14:00 local AND latest ≥ 17:00 local. GraphCast's
+    # short horizon (~48h with trailing Nones) fails this most often —
+    # correctly so: its late-day day-max estimates were off by −9.6°F.
+    tz = ZoneInfo(timezone_name)
+    local_hours = [s[1].astimezone(tz).hour for s in samples]
+    if min(local_hours) > 14 or max(local_hours) < 17:
         return None
     predicted_max, max_valid_time = max(samples, key=lambda sample: sample[0])
     return run_date, predicted_max, max_valid_time
@@ -122,19 +133,33 @@ def _provider_report(
 
 
 def _normalized_weight_map(provider_reports: Mapping[str, Mapping[str, Any]]) -> dict[str, str]:
+    # 2026-06-12 fix: skill-based weighting was effectively UNIFORM.
+    # Two compounding causes:
+    #   1. score = 1/(1+MAE) — MAE 1.6 vs 4.1 gave only a 2:1 score ratio.
+    #   2. max(0.10, ...) floor — with 11 providers the normalized mean is
+    #      ~0.09, so nearly every provider fell below the floor and was
+    #      raised to exactly 0.10 → all weights identical → ECMWF_AIFS
+    #      (MAE 1.57) counted the same as GraphCast (MAE 4.08).
+    # New scheme: inverse-MAE-squared (variance weighting — the optimal
+    # combination weight for independent unbiased estimators), floor
+    # lowered to 0.02 (keeps a provider alive for ensemble diversity
+    # without letting noise dominate). build_forecast_distribution
+    # re-normalizes by total weight, so the floor needs no renormalize.
     raw_scores: dict[str, float] = {}
     for provider_id, report in provider_reports.items():
-        mae = report.get("mean_abs_error_f")
-        score = 1.0 / (1.0 + (float(mae) if mae is not None else 4.0))
+        mae = float(report.get("mean_abs_error_f") or 4.0)
+        score = 1.0 / max(0.25, mae * mae)
         raw_scores[provider_id] = score
     total_score = sum(raw_scores.values())
     weights: dict[str, str] = {}
     for provider_id in provider_reports:
         normalized = (raw_scores[provider_id] / total_score) if total_score > 0 else 0.0
         sample_count = float(provider_reports[provider_id].get("sample_count") or 0.0)
+        # Shrink toward uniform when the sample is thin (<20 samples).
         shrinkage_factor = max(0.0, 1.0 - min(sample_count, 20.0) / 20.0)
-        shrunk = (0.55 * shrinkage_factor) + (normalized * (1.0 - shrinkage_factor))
-        clamped = min(0.80, max(0.10, shrunk)) if provider_reports else 0.0
+        uniform = 1.0 / max(1, len(provider_reports))
+        shrunk = (uniform * shrinkage_factor) + (normalized * (1.0 - shrinkage_factor))
+        clamped = min(0.80, max(0.02, shrunk))
         weights[provider_id] = f"{clamped:.6f}"
     return weights
 
