@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timezone
 from decimal import Decimal
-from statistics import fmean
+from statistics import fmean, median, pstdev
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo
 
@@ -140,8 +140,22 @@ def _provider_report(
     # left mid-range p_yes underconfident by ~0.3 (predicted 0.55 →
     # realized 0.87 on 468 settled days).
     if day_max_biases:
-        report["day_max_bias_f"] = fmean(day_max_biases)
+        # MEDIAN, not mean (2026-06-12): day-max errors are right-skewed —
+        # occasionally a provider runs several °F hot, but the typical day
+        # it runs ~1°F cool. The mean washes the typical-day signal out
+        # (HOU: GFS mean +1.8 vs median −0.5). The bias correction shifts
+        # the whole PMF, so it must track the TYPICAL (median) error.
+        # Direct measurement (415 city-days, 10 AM context): blend with
+        # mean-based corrections still sat 1.1-1.2°F cool of the realized
+        # high, actual landing above the blend 76% of the time.
+        report["day_max_bias_f"] = median(day_max_biases)
         report["day_max_sample_count"] = len(day_max_biases)
+        # Empirical day-max error spread — the honest per-provider sigma.
+        # The engine's heuristic sigma (base + reliability + boundary
+        # add-ons) stacked to ~2.9-3.3°F while measured day-max error
+        # spread is ~2°F; the over-width compressed mid-range p_yes
+        # toward 0.5 (validation v4: predicted 0.55 → realized 0.81).
+        report["day_max_sigma_f"] = pstdev(day_max_biases) if len(day_max_biases) >= 2 else None
     return report
 
 
@@ -464,4 +478,50 @@ def extract_provider_bias_adjustments(
         # measured across 468 settled city-days) this is a noise bound,
         # not a correction driver.
         results[provider_id] = max(Decimal("-3"), min(Decimal("3"), bias))
+    return results
+
+
+def extract_provider_day_max_sigmas(
+    report: Mapping[str, Any] | None,
+    *,
+    season_key: str | None = None,
+    lead_hours: float | None = None,
+) -> dict[str, Decimal]:
+    """Empirical per-provider day-max error sigma (2026-06-12).
+
+    Replaces the engine's heuristic sigma stack (base + reliability +
+    boundary add-ons, which inflated to ~3°F vs ~2°F measured) with the
+    observed spread of (predicted day-max − realized high). Selection
+    mirrors extract_provider_bias_adjustments: per-(season, lead-bucket)
+    first, global fallback, ≥6 day-max samples required. Clamped to
+    [1.2, 6.0] °F as a noise bound.
+    """
+    if not report:
+        return {}
+    lead_bucket = _lead_bucket_name(lead_hours) if lead_hours is not None else None
+    selected_reports = _extract_report_mapping(report, season_key=season_key, lead_bucket=lead_bucket)
+    global_reports = _extract_report_mapping(report, season_key=None, lead_bucket=None)
+    results: dict[str, Decimal] = {}
+    provider_ids = set()
+    for mapping in (global_reports, selected_reports):
+        if isinstance(mapping, Mapping):
+            provider_ids.update(str(k) for k in mapping.keys())
+    for provider_id in sorted(provider_ids):
+        source = None
+        for mapping in (selected_reports, global_reports):
+            if not isinstance(mapping, Mapping):
+                continue
+            candidate = mapping.get(provider_id)
+            if (isinstance(candidate, Mapping)
+                    and int(candidate.get("day_max_sample_count") or 0) >= 6
+                    and candidate.get("day_max_sigma_f") is not None):
+                source = candidate
+                break
+        if source is None:
+            continue
+        try:
+            sigma = Decimal(str(source.get("day_max_sigma_f")))
+        except Exception:
+            continue
+        results[provider_id] = max(Decimal("1.2"), min(Decimal("6"), sigma))
     return results

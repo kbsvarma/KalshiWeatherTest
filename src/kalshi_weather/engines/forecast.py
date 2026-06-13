@@ -274,6 +274,7 @@ def build_forecast_distribution(
     as_of_time: datetime,
     provider_reliability: Mapping[str, Decimal] | None = None,
     provider_bias_adjustments: Mapping[str, Decimal] | None = None,
+    provider_sigma_overrides: Mapping[str, Decimal] | None = None,
 ) -> ForecastEngineResult:
     if not snapshots:
         raise ValueError("at least one forecast snapshot is required")
@@ -370,8 +371,15 @@ def build_forecast_distribution(
             if settlement_rule.threshold_f is not None
             else None
         )
+        _sigma_override = (
+            provider_sigma_overrides.get(snapshot.provider_id)
+            if provider_sigma_overrides is not None
+            else None
+        )
         support_sigmas.append(
-            _provider_sigma(
+            _sigma_override
+            if _sigma_override is not None
+            else _provider_sigma(
                 lead_hours,
                 snapshot.provider_id,
                 boundary_distance=boundary_distance,
@@ -399,11 +407,27 @@ def build_forecast_distribution(
             if settlement_rule.threshold_f is not None
             else None
         )
-        sigma = _provider_sigma(
-            lead_hours,
-            snapshot.provider_id,
-            boundary_distance=boundary_distance,
-            reliability_weight=reliability_weight,
+        # 2026-06-12: empirical day-max sigma override. The heuristic
+        # stack (base + reliability + boundary add-ons) was tuned for the
+        # old uniform-weight scheme and inflated sigma to ~3°F; measured
+        # day-max error spread is ~2°F. Over-width compressed mid-range
+        # p_yes toward 0.5 (validation v4: predicted 0.55 → realized
+        # 0.81). The empirical value already includes every error source,
+        # so no add-ons are applied on top.
+        _sigma_override = (
+            provider_sigma_overrides.get(snapshot.provider_id)
+            if provider_sigma_overrides is not None
+            else None
+        )
+        sigma = (
+            _sigma_override
+            if _sigma_override is not None
+            else _provider_sigma(
+                lead_hours,
+                snapshot.provider_id,
+                boundary_distance=boundary_distance,
+                reliability_weight=reliability_weight,
+            )
         )
         provider_sigmas_f[snapshot.provider_id] = sigma
         provider_spec = _provider_spec(snapshot.provider_id)

@@ -3,6 +3,7 @@ from .drift import build_drift_report
 from .forecast_calibration import (
     build_provider_reliability_report,
     extract_provider_bias_adjustments,
+    extract_provider_day_max_sigmas,
     extract_provider_reliability_weights,
 )
 from .qualification import QualificationScorecard, build_qualification_scorecard
@@ -31,6 +32,7 @@ __all__ = [
     "QualificationScorecard",
     "build_qualification_scorecard",
     "extract_provider_bias_adjustments",
+    "extract_provider_day_max_sigmas",
     "extract_provider_reliability_weights",
     "build_live_gate_report",
     "NYC_MVP_LIVE_PROFILE",

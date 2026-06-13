@@ -26,6 +26,7 @@ def _ticker_settle_date(ticker: str) -> str:
 
 from kalshi_weather.analytics.forecast_calibration import (
     extract_provider_bias_adjustments,
+    extract_provider_day_max_sigmas,
     extract_provider_reliability_weights,
 )
 from kalshi_weather.domain.enums import DecisionType, QualificationState, RunMode
@@ -427,6 +428,15 @@ def run_market_decision_cycle(
         if provider_calibration_report is not None
         else (provider_bias_adjustments or {})
     )
+    derived_provider_sigma_overrides = (
+        extract_provider_day_max_sigmas(
+            provider_calibration_report,
+            season_key=season_key,
+            lead_hours=lead_hours,
+        )
+        if provider_calibration_report is not None
+        else {}
+    )
     forecast_result = build_forecast_distribution(
         snapshots=available_forecasts,
         settlement_rule=settlement_rule,
@@ -434,6 +444,7 @@ def run_market_decision_cycle(
         as_of_time=as_of_time,
         provider_reliability=derived_provider_reliability,
         provider_bias_adjustments=derived_provider_bias_adjustments,
+        provider_sigma_overrides=derived_provider_sigma_overrides,
     )
     current_state = build_current_state_estimate(
         observations=observations,

@@ -32,6 +32,7 @@ from zoneinfo import ZoneInfo
 from kalshi_weather.analytics import (
     build_provider_reliability_report,
     extract_provider_bias_adjustments,
+    extract_provider_day_max_sigmas,
     extract_provider_reliability_weights,
 )
 from kalshi_weather.engines.forecast import build_forecast_distribution
@@ -111,11 +112,18 @@ def main() -> int:
             )
         report = calibration_by_city[city_id]
         lead_hours = 6.0  # 10 AM → ~4 PM peak
-        reliability = extract_provider_reliability_weights(report, season_key=None, lead_hours=lead_hours)
+        # season_key must be passed to mirror live behavior — decision.py
+        # derives it from as_of_time; with None the per-(season, lead-bucket)
+        # reports are bypassed and the diluted global stats get used.
+        month = decision_time.month
+        season_key = ("DJF" if month in (12, 1, 2) else "MAM" if month in (3, 4, 5)
+                      else "JJA" if month in (6, 7, 8) else "SON")
+        reliability = extract_provider_reliability_weights(report, season_key=season_key, lead_hours=lead_hours)
         bias_adjustments = (
             {} if args.no_bias
-            else extract_provider_bias_adjustments(report, season_key=None, lead_hours=lead_hours)
+            else extract_provider_bias_adjustments(report, season_key=season_key, lead_hours=lead_hours)
         )
+        sigma_overrides = extract_provider_day_max_sigmas(report, season_key=season_key, lead_hours=lead_hours)
 
         for offset in THRESHOLD_OFFSETS:
             threshold = Decimal(str(round(actual_high))) + Decimal(offset)
@@ -146,6 +154,7 @@ def main() -> int:
                     as_of_time=decision_time,
                     provider_reliability=reliability,
                     provider_bias_adjustments=bias_adjustments,
+                    provider_sigma_overrides=sigma_overrides,
                 )
             except Exception:
                 continue
