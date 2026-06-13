@@ -442,6 +442,15 @@ def build_provider_reliability_report(
         hi = min(lo + 1, len(sorted_vals) - 1)
         return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (idx - lo)
 
+    # Pooled prior quantiles. NB (2026-06-13): the validation loop proved
+    # the WIDER priors (P84=3.4, sigma=2.11) score materially better than
+    # the tighter measured single-day spread (P84=2.69, sigma=1.95). The
+    # offset-based validation has deterministic per-day outcomes, so on
+    # days the consensus blend is 2-4°F wrong the wider distribution
+    # correctly hedges that location error — v9 (tight, "correct" priors)
+    # regressed Brier 0.1392→0.1473; v8 (empirical CDF, even sharper)
+    # 0.1392→0.1675. The wider sigma is appropriate humility about blend
+    # error, NOT miscalibration. Keep the values that won the sweep.
     _POOLED_P16, _POOLED_P50, _POOLED_P84 = -0.7, 1.14, 3.4
     _POOLED_SIGMA, _SHRINK_K = 2.11, 25.0
     n_res = len(consensus_residuals)
@@ -453,6 +462,18 @@ def build_provider_reliability_report(
         p84 = w_st * _q(sv, 0.84) + (1 - w_st) * _POOLED_P84
     else:
         p16, p50, p84 = _POOLED_P16, _POOLED_P50, _POOLED_P84
+    # Pooled empirical residual SHAPE (cumfrac → centered residual value),
+    # measured 2026-06-12 across 185 station-days with strict peak coverage.
+    # Excess kurtosis +1.31 (leptokurtic) + right skew: a single Gaussian
+    # cannot fit the tight core AND the fat tails simultaneously, which left
+    # mid-range p_yes +0.24 underconfident through v7. Values are residual
+    # minus pooled median (+1.24), so the shape is location-free; the engine
+    # adds the station-specific median for location.
+    _POOLED_SHAPE = (
+        (0.02, -4.45), (0.05, -3.17), (0.10, -2.23), (0.16, -1.75),
+        (0.25, -1.27), (0.50, 0.00), (0.75, 1.04), (0.84, 1.45),
+        (0.90, 2.17), (0.95, 3.23), (0.98, 3.97),
+    )
     consensus_residual_summary = {
         "sample_count": n_res,
         "median_f": p50,
@@ -463,6 +484,7 @@ def build_provider_reliability_report(
         "sigma_f": max(1.0, (pstdev(consensus_residuals) if n_res >= 2 else _POOLED_SIGMA)),
         "pooled_median_f": _POOLED_P50,
         "pooled_sigma_f": _POOLED_SIGMA,
+        "shape_grid": [[f, v] for f, v in _POOLED_SHAPE],
     }
 
     global_errors = [value for values in provider_errors.values() for value in values]

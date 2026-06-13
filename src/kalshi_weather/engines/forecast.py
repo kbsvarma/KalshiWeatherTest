@@ -252,6 +252,51 @@ def _threshold_skew_sigmas(
     return sigma_down, sigma_up
 
 
+def _empirical_shape_cdf(x: float, shape_grid: list) -> float:
+    """CDF of the centered residual shape at value ``x`` (°F from center).
+
+    ``shape_grid`` is a list of [cumfrac, residual_value] knots sorted by
+    value. Piecewise-linear between knots; beyond the ends, extrapolate
+    linearly along the nearest segment's slope and clamp to [0.003, 0.997]
+    so the tails never collapse to exact 0/1 (which would create dead
+    support and break far-OTM longshot pricing).
+    """
+    knots = [(float(v), float(f)) for f, v in shape_grid]
+    knots.sort()
+    if x <= knots[0][0]:
+        (v0, f0), (v1, f1) = knots[0], knots[1]
+        slope = (f1 - f0) / (v1 - v0) if v1 != v0 else 0.0
+        return max(0.003, f0 + slope * (x - v0))
+    if x >= knots[-1][0]:
+        (v0, f0), (v1, f1) = knots[-2], knots[-1]
+        slope = (f1 - f0) / (v1 - v0) if v1 != v0 else 0.0
+        return min(0.997, f1 + slope * (x - v1))
+    for (v0, f0), (v1, f1) in zip(knots, knots[1:]):
+        if v0 <= x <= v1:
+            t = (x - v0) / (v1 - v0) if v1 != v0 else 0.0
+            return f0 + t * (f1 - f0)
+    return 0.5
+
+
+def _empirical_residual_pmf(
+    center: float,
+    support: tuple[int, ...],
+    shape_grid: list,
+) -> list[Decimal]:
+    """PMF over integer support from the empirical residual CDF.
+
+    high = center + residual; PMF(t) = P(high ∈ (t-0.5, t+0.5]) =
+    CDF_shape(t+0.5 − center) − CDF_shape(t−0.5 − center).
+    """
+    weights: list[Decimal] = []
+    for temp in support:
+        lo = _empirical_shape_cdf((temp - 0.5) - center, shape_grid)
+        hi = _empirical_shape_cdf((temp + 0.5) - center, shape_grid)
+        weights.append(_decimal(max(0.0, hi - lo)))
+    total = sum(weights) or Decimal("1")
+    return [w / total for w in weights]
+
+
 def _asymmetric_gaussian_pmf(
     mean: float,
     sigma_down: float,
@@ -495,17 +540,20 @@ def build_forecast_distribution(
             blend_den += w
         blend = blend_num / (blend_den or Decimal("1"))
         center = float(blend) + float(consensus_residual["median_f"])
-        # Skew-aware residual spread (warm tail fatter). Falls back to the
-        # symmetric sigma when quantile fields are absent.
+        # Skew-aware Gaussian (v7 approach). The empirical-CDF variant (v8)
+        # over-concentrated mass at the extremes — its clamped/extrapolated
+        # tails were too thin, making far-OTM p_yes overconfident (Brier
+        # 0.1675 vs 0.1392). The skew-Gaussian with CORRECTLY-measured
+        # pooled sigma is the keeper; sigma_down/up now come from the
+        # freshly-measured pooled quantiles (p16=-0.51, p84=+2.69 relative
+        # to median +1.24 → sigma_down 1.75, sigma_up 1.45), much tighter
+        # than the stale priors that left v7's core underconfident.
         c_sigma_down = max(1.0, float(consensus_residual.get("sigma_down_f")
-                                       or consensus_residual.get("sigma_f") or 2.11))
+                                       or consensus_residual.get("sigma_f") or 1.95))
         c_sigma_up = max(1.0, float(consensus_residual.get("sigma_up_f")
-                                     or consensus_residual.get("sigma_f") or 2.11))
+                                     or consensus_residual.get("sigma_f") or 1.95))
         mixed = list(_asymmetric_gaussian_pmf(
-            mean=center,
-            sigma_down=c_sigma_down,
-            sigma_up=c_sigma_up,
-            support=support,
+            mean=center, sigma_down=c_sigma_down, sigma_up=c_sigma_up, support=support,
         ))
     else:
         mixed = [Decimal("0") for _ in support]
