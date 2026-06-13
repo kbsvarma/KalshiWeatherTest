@@ -124,6 +124,7 @@ def main() -> int:
             else extract_provider_bias_adjustments(report, season_key=season_key, lead_hours=lead_hours)
         )
         sigma_overrides = extract_provider_day_max_sigmas(report, season_key=season_key, lead_hours=lead_hours)
+        consensus_residual = report.get("consensus_residuals")
 
         for offset in THRESHOLD_OFFSETS:
             threshold = Decimal(str(round(actual_high))) + Decimal(offset)
@@ -155,6 +156,7 @@ def main() -> int:
                     provider_reliability=reliability,
                     provider_bias_adjustments=bias_adjustments,
                     provider_sigma_overrides=sigma_overrides,
+                    consensus_residual=consensus_residual,
                 )
             except Exception:
                 continue

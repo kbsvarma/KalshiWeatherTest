@@ -369,6 +369,102 @@ def build_provider_reliability_report(
                     provider_weights_by_season_lead_bucket[season][lead_bucket][provider_id]
                 )
 
+    # ── Pass 2 (2026-06-12): consensus residual distribution ────────────
+    # The provider-MIXTURE PMF structurally over-disperses: each provider
+    # contributes its full individual error width, but the skill-weighted
+    # consensus mean is more accurate than any single provider. Validation
+    # v2-v5 on 448 settled days showed mid-range p_yes stuck ~+0.26
+    # underconfident no matter how per-provider bias/sigma were fixed.
+    # The honest predictive distribution is:
+    #     actual_high ~ blend + residual,  residual measured empirically.
+    # Here: for each settled local_date, reconstruct the 10:00-local
+    # decision-time blend (latest run per provider before 10:00, peak
+    # coverage required, day-max bias-corrected, skill-weighted) and
+    # record residual = observed_max − blend.
+    tz = ZoneInfo(station.timezone)
+    bias_by_provider: dict[str, float] = {}
+    weight_by_provider: dict[str, float] = {}
+    for provider_id, pr in provider_reports.items():
+        if int(pr.get("day_max_sample_count") or 0) >= 6 and pr.get("day_max_bias_f") is not None:
+            bias_by_provider[provider_id] = max(-3.0, min(3.0, float(pr["day_max_bias_f"])))
+        else:
+            bias_by_provider[provider_id] = 0.0
+        weight_by_provider[provider_id] = float(provider_weights.get(provider_id, "0.05"))
+
+    # latest day-max prediction per (local_date, provider) with run < 10:00 local
+    best_run: dict[tuple[str, str], tuple[datetime, float]] = {}
+    for snapshot in forecasts:
+        day_max = _forecast_day_max(snapshot, station.timezone)
+        if day_max is None:
+            continue
+        local_date, predicted_max, _ = day_max
+        run_local = snapshot.provider_run_time.astimezone(tz)
+        if run_local.date().isoformat() != local_date or run_local.hour >= 10:
+            continue
+        key = (local_date, snapshot.provider_id)
+        prev = best_run.get(key)
+        if prev is None or snapshot.provider_run_time > prev[0]:
+            best_run[key] = (snapshot.provider_run_time, float(predicted_max))
+
+    by_date: dict[str, dict[str, float]] = defaultdict(dict)
+    for (local_date, provider_id), (_, pmax) in best_run.items():
+        by_date[local_date][provider_id] = pmax
+
+    # Residual measured against the RAW skill-weighted blend (NO per-provider
+    # bias correction) so the engine — which centers the consensus PMF on the
+    # same raw blend — applies exactly one location correction. v6 double-
+    # corrected (engine blend had bias+cloud/wind adjustments the residual
+    # measurement lacked) → uniform −0.9°F cool shift / +0.18 calibration gap.
+    consensus_residuals: list[float] = []
+    for local_date, prov_maxima in by_date.items():
+        observed = observed_maxima.get(local_date)
+        if observed is None or len(prov_maxima) < 3:
+            continue
+        num = den = 0.0
+        for provider_id, pmax in prov_maxima.items():
+            w = weight_by_provider.get(provider_id, 0.05)
+            num += pmax * w  # RAW max, no bias subtraction
+            den += w
+        if den <= 0:
+            continue
+        consensus_residuals.append(float(observed) - num / den)
+
+    # Pooled prior (measured 2026-06-12 across 415 station-days, RAW blend):
+    # residuals are right-skewed (warm tail fatter). Track p16/p50/p84 so the
+    # engine can build a skew-aware PMF instead of a symmetric Gaussian — the
+    # symmetric fit (v6) lost the fat warm tail and mis-set the extreme
+    # buckets. Empirical-Bayes shrink each quantile toward the pool.
+    def _q(sorted_vals: list[float], frac: float) -> float:
+        if not sorted_vals:
+            return 0.0
+        idx = frac * (len(sorted_vals) - 1)
+        lo = int(idx)
+        hi = min(lo + 1, len(sorted_vals) - 1)
+        return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (idx - lo)
+
+    _POOLED_P16, _POOLED_P50, _POOLED_P84 = -0.7, 1.14, 3.4
+    _POOLED_SIGMA, _SHRINK_K = 2.11, 25.0
+    n_res = len(consensus_residuals)
+    sv = sorted(consensus_residuals)
+    if n_res >= 5:
+        w_st = n_res / (n_res + _SHRINK_K)
+        p16 = w_st * _q(sv, 0.16) + (1 - w_st) * _POOLED_P16
+        p50 = w_st * _q(sv, 0.50) + (1 - w_st) * _POOLED_P50
+        p84 = w_st * _q(sv, 0.84) + (1 - w_st) * _POOLED_P84
+    else:
+        p16, p50, p84 = _POOLED_P16, _POOLED_P50, _POOLED_P84
+    consensus_residual_summary = {
+        "sample_count": n_res,
+        "median_f": p50,
+        "p16_f": p16,
+        "p84_f": p84,
+        "sigma_down_f": max(1.0, p50 - p16),
+        "sigma_up_f": max(1.0, p84 - p50),
+        "sigma_f": max(1.0, (pstdev(consensus_residuals) if n_res >= 2 else _POOLED_SIGMA)),
+        "pooled_median_f": _POOLED_P50,
+        "pooled_sigma_f": _POOLED_SIGMA,
+    }
+
     global_errors = [value for values in provider_errors.values() for value in values]
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -382,6 +478,7 @@ def build_provider_reliability_report(
         "provider_weights_by_season": provider_weights_by_season,
         "provider_reports_by_season_lead_bucket": provider_reports_by_season_lead_bucket,
         "provider_weights_by_season_lead_bucket": provider_weights_by_season_lead_bucket,
+        "consensus_residuals": consensus_residual_summary,
         "sample_sufficient": len(global_errors) >= 24 and sum(len(run_ids) for run_ids in provider_run_ids.values()) >= 4,
     }
 

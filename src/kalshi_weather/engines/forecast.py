@@ -275,6 +275,7 @@ def build_forecast_distribution(
     provider_reliability: Mapping[str, Decimal] | None = None,
     provider_bias_adjustments: Mapping[str, Decimal] | None = None,
     provider_sigma_overrides: Mapping[str, Decimal] | None = None,
+    consensus_residual: Mapping[str, float] | None = None,
 ) -> ForecastEngineResult:
     if not snapshots:
         raise ValueError("at least one forecast snapshot is required")
@@ -337,19 +338,25 @@ def build_forecast_distribution(
         )
     snapshots = filtered_snapshots
 
+    # 2026-06-12: track RAW provider maxima (pre-bias-correction) so the
+    # consensus path can center on the same quantity the calibration
+    # measured its residual against. The per-provider corrected maxima
+    # (provider_maxima_f) still feed the legacy mixture PMF.
+    provider_raw_maxima_f: dict[str, Decimal] = {}
     for snapshot in snapshots:
         window_values = [
             temp
             for temp, valid_for in zip(snapshot.hourly_temp_path_f, snapshot.valid_for_times, strict=False)
             if settlement_rule.local_standard_window_start <= valid_for <= settlement_rule.local_standard_window_end
         ]
-        provider_max = min(window_values) if is_low_market else max(window_values)
-        provider_max += _provider_bias_adjustment(
+        provider_raw_max = min(window_values) if is_low_market else max(window_values)
+        provider_raw_maxima_f[snapshot.provider_id] = provider_raw_max
+        provider_max = provider_raw_max + _provider_bias_adjustment(
             snapshot,
             city_profile,
             settlement_rule,
             as_of_time,
-            provider_max,
+            provider_raw_max,
             empirical_bias_adjustment=(
                 provider_bias_adjustments.get(snapshot.provider_id)
                 if provider_bias_adjustments is not None
@@ -461,12 +468,51 @@ def build_forecast_distribution(
         )
         provider_pmfs.append((provider_weight, pmf))
 
+    # ── 2026-06-12: consensus-residual distribution ──────────────────
+    # When the calibration report provides a measured residual for the
+    # skill-weighted consensus (actual = blend + residual), use a single
+    # PMF centered at blend + residual_median with the measured residual
+    # sigma — instead of mixing per-provider PMFs. The mixture carries
+    # each provider's full individual error width (sigma ~2.9°F effective)
+    # while the consensus error is tighter (sigma 2.11°F measured over
+    # 415 city-days); that over-width compressed mid-range p_yes toward
+    # 0.5 (validation v2-v5: predicted 0.55 → realized 0.81).
     total_weight = sum(weight for weight, _ in provider_pmfs) or Decimal("1")
-    mixed = [Decimal("0") for _ in support]
-    for weight, pmf in provider_pmfs:
-        normalized_weight = weight / total_weight
-        for index, probability in enumerate(pmf):
-            mixed[index] += normalized_weight * probability
+    use_consensus = (
+        consensus_residual is not None
+        and consensus_residual.get("sigma_f") is not None
+        and consensus_residual.get("median_f") is not None
+    )
+    if use_consensus:
+        # Center on the RAW skill-weighted blend (matching the calibration
+        # residual measurement exactly — one location correction only).
+        blend_num = Decimal("0")
+        blend_den = Decimal("0")
+        for snapshot in snapshots:
+            pid = snapshot.provider_id
+            w = provider_weights[pid]
+            blend_num += provider_raw_maxima_f[pid] * w
+            blend_den += w
+        blend = blend_num / (blend_den or Decimal("1"))
+        center = float(blend) + float(consensus_residual["median_f"])
+        # Skew-aware residual spread (warm tail fatter). Falls back to the
+        # symmetric sigma when quantile fields are absent.
+        c_sigma_down = max(1.0, float(consensus_residual.get("sigma_down_f")
+                                       or consensus_residual.get("sigma_f") or 2.11))
+        c_sigma_up = max(1.0, float(consensus_residual.get("sigma_up_f")
+                                     or consensus_residual.get("sigma_f") or 2.11))
+        mixed = list(_asymmetric_gaussian_pmf(
+            mean=center,
+            sigma_down=c_sigma_down,
+            sigma_up=c_sigma_up,
+            support=support,
+        ))
+    else:
+        mixed = [Decimal("0") for _ in support]
+        for weight, pmf in provider_pmfs:
+            normalized_weight = weight / total_weight
+            for index, probability in enumerate(pmf):
+                mixed[index] += normalized_weight * probability
 
     total_probability = sum(mixed) or Decimal("1")
     normalized_mixed = tuple(prob / total_probability for prob in mixed)

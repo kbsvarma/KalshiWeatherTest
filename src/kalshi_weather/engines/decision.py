@@ -437,6 +437,11 @@ def run_market_decision_cycle(
         if provider_calibration_report is not None
         else {}
     )
+    derived_consensus_residual = (
+        provider_calibration_report.get("consensus_residuals")
+        if provider_calibration_report is not None
+        else None
+    )
     forecast_result = build_forecast_distribution(
         snapshots=available_forecasts,
         settlement_rule=settlement_rule,
@@ -445,6 +450,7 @@ def run_market_decision_cycle(
         provider_reliability=derived_provider_reliability,
         provider_bias_adjustments=derived_provider_bias_adjustments,
         provider_sigma_overrides=derived_provider_sigma_overrides,
+        consensus_residual=derived_consensus_residual,
     )
     current_state = build_current_state_estimate(
         observations=observations,
