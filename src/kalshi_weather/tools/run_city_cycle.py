@@ -778,8 +778,20 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
 
     payload_by_ticker = {p.get('ticker'): p for p in market_payloads}
     keep_pairs: list[tuple] = []
-    skipped_b = skipped_less = 0
+    skipped_b = skipped_less = skipped_stale = 0
+    # 2026-06-13 SAFETY GUARD: never evaluate/trade a market whose settlement
+    # date is in the past. Root-caused after a resume-from-2-week-downtime
+    # placed orders on settled (26MAY30) markets — Kalshi auto-rejected them
+    # (no loss) but the bot must not depend on that. Also skip markets whose
+    # status the payload reports as not active/open. Anchored to the city's
+    # LOCAL today, since settlement is local-date based.
+    _local_today = datetime.now(ZoneInfo(station.timezone)).date()
     for ms, pl in zip(market_snapshots, market_payloads, strict=False):
+        settle = parse_market_date(ms.market_ticker)
+        status = (pl.get('status') or '').lower()
+        if (settle is not None and settle < _local_today) or status in ('finalized', 'settled', 'closed', 'determined'):
+            skipped_stale += 1
+            continue
         if _ticker_is_b(ms.market_ticker):
             skipped_b += 1
             continue
@@ -787,9 +799,15 @@ def _process_city(  # noqa: PLR0913 — orchestration helper; many deps by desig
             skipped_less += 1
             continue
         keep_pairs.append((ms, pl))
-    if skipped_b or skipped_less:
-        print(f"[CYCLE-FILTER] {city_profile.city_id}: skipping {skipped_b} B-markets + {skipped_less} less-markets "
+    if skipped_b or skipped_less or skipped_stale:
+        print(f"[CYCLE-FILTER] {city_profile.city_id}: skipping {skipped_stale} stale/settled + "
+              f"{skipped_b} B-markets + {skipped_less} less-markets "
               f"(prefetch only {len(keep_pairs)} of {len(market_snapshots)} markets)")
+    if skipped_stale and not keep_pairs:
+        # Every market for this city was stale — strong signal the open-market
+        # fetch returned a cached/expired list. Refuse to proceed for this city.
+        print(f"[STALE-GUARD] {city_profile.city_id}: ALL {skipped_stale} markets settle in the past "
+              f"(latest local_today={_local_today}); skipping city — check market fetch freshness")
     filtered_snapshots = [ms for ms, _ in keep_pairs]
     filtered_payloads  = [pl for _,  pl in keep_pairs]
 

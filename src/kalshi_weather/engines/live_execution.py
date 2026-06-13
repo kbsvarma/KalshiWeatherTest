@@ -661,9 +661,23 @@ def maybe_place_live_order(
             price_cents=price_cents, quantity=quantity, response=None,
         )
 
-    # Successful (even if not filled — IOC may have killed it)
     order = resp.get("order") if isinstance(resp, dict) else {}
     order_status = order.get("status", "unknown") if isinstance(order, dict) else "unknown"
+    # 2026-06-13: only treat as a real fill when Kalshi confirms execution
+    # with a positive fill count. Previously ANY non-exception response set
+    # placed=True — so IOC-killed orders and orders on settled markets (which
+    # Kalshi creates-then-immediately-cancels rather than rejecting) logged a
+    # false "✓ PLACED". placed now reflects ACTUAL execution.
+    def _fill_count(o: dict) -> float:
+        for k in ("fill_count_fp", "fill_count", "filled_count"):
+            v = o.get(k)
+            if v is not None:
+                try:
+                    return float(v)
+                except Exception:
+                    pass
+        return 0.0
+    filled = isinstance(order, dict) and order_status == "executed" and _fill_count(order) > 0
     _record_live_order(
         store,
         market_ticker=explanation.market_ticker,
@@ -672,14 +686,19 @@ def maybe_place_live_order(
             "decision_id": explanation.decision_id,
             "kalshi_order_id": order.get("order_id") if isinstance(order, dict) else None,
             "kalshi_status": order_status,
+            "filled_count": _fill_count(order) if isinstance(order, dict) else 0.0,
             "response": resp,
-            # is_reentry: True iff this is a same-day re-buy of a market
-            # we closed earlier today. Counted by the re-entry cap on
-            # the NEXT evaluation of this ticker.
             "is_reentry": is_reentry,
         },
-        status=f"PLACED_{order_status.upper()}",
+        status=(f"PLACED_{order_status.upper()}" if filled
+                else f"UNFILLED_{order_status.upper()}"),
     )
+    if not filled:
+        return LiveExecutionResult(
+            placed=False, dry_run=False, order_id=client_order_id,
+            blocker_reason=f"not_filled (kalshi_status={order_status}, fill=0)",
+            price_cents=price_cents, quantity=quantity, response=resp,
+        )
     return LiveExecutionResult(
         placed=True,
         dry_run=False,
