@@ -420,21 +420,15 @@ def build_forecast_distribution(
             else None
         )
         sigma_down, sigma_up = _threshold_skew_sigmas(float(sigma), threshold_distance)
-        # 2026-05-26 Fix A — overconfidence compression.
-        # Audit of 44 settled less-yes bets showed p_yes bucket [0.85, 0.97]
-        # had a 19% empirical win rate vs ~86% expected — severe under-spread
-        # in the PMF tails. Realized highs averaged +2.0°F vs the threshold
-        # (cool bias in either the mean or sigma). Multiply both sigmas by
-        # _SIGMA_INFLATION (1.4) so extreme p_yes values from a single
-        # provider compress toward 0.7 instead of 0.95+. The skew direction
-        # from _threshold_skew_sigmas is preserved.
-        # NB: this is a stopgap for the immediate bleed. The real fix is
-        # to correct the underlying ~2°F cold bias in mean predictions
-        # (climatology recency + per-direction provider bias). Tracking
-        # in task #16 follow-up work.
-        _SIGMA_INFLATION = 1.4
-        sigma_down *= _SIGMA_INFLATION
-        sigma_up *= _SIGMA_INFLATION
+        # 2026-06-12: removed the 1.4× sigma inflation added 2026-05-26.
+        # It was a stopgap compensating for the phantom cool bias (whose
+        # real cause — partial-coverage poisoning in the calibration's
+        # _forecast_day_max — is now fixed at the source). With honest
+        # calibration, the 468-day validation replay showed the inflation
+        # made the model severely UNDERCONFIDENT: predicted 0.55 → realized
+        # 0.87, predicted 0.65 → realized 0.94 (Brier 0.168). Fat tails
+        # were dragging p_yes toward 0.5 and gating out the bot's best
+        # bets. tools/validate_calibration.py is the regression check.
         pmf = _asymmetric_gaussian_pmf(
             mean=float(provider_maxima_f[snapshot.provider_id]),
             sigma_down=sigma_down,

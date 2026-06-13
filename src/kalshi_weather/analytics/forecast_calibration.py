@@ -120,16 +120,29 @@ def _provider_report(
     biases: list[float],
     point_sample_count: int,
     run_ids: set[str],
+    day_max_biases: list[float] | None = None,
 ) -> dict[str, Any]:
     mae = fmean(abs_errors) if abs_errors else None
     bias = fmean(biases) if biases else None
-    return {
+    report: dict[str, Any] = {
         "sample_count": len(abs_errors),
         "point_sample_count": point_sample_count,
         "unique_run_count": len(run_ids),
         "mean_abs_error_f": mae,
         "mean_bias_f": bias,
     }
+    # 2026-06-12: day-max bias tracked SEPARATELY from hourly point bias.
+    # `mean_bias_f` mixes ~24 hourly point errors per snapshot (bias ≈ 0;
+    # hourly temps verify well) with 1 day-max error (the −1 to −2°F
+    # peak-smoothing bias that drives our markets) — diluting the day-max
+    # signal ~24:1. The provider-max correction in the forecast engine
+    # needs the day-max-only number; validation showed the diluted value
+    # left mid-range p_yes underconfident by ~0.3 (predicted 0.55 →
+    # realized 0.87 on 468 settled days).
+    if day_max_biases:
+        report["day_max_bias_f"] = fmean(day_max_biases)
+        report["day_max_sample_count"] = len(day_max_biases)
+    return report
 
 
 def _normalized_weight_map(provider_reports: Mapping[str, Mapping[str, Any]]) -> dict[str, str]:
@@ -230,6 +243,10 @@ def build_provider_reliability_report(
     seasonal_lead_biases: dict[tuple[str, str, str], list[float]] = defaultdict(list)
     seasonal_lead_point_samples: dict[tuple[str, str, str], int] = defaultdict(int)
     seasonal_lead_run_ids: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    # Day-max-only bias tracking (see _provider_report 2026-06-12 note)
+    provider_day_max_biases: dict[str, list[float]] = defaultdict(list)
+    seasonal_day_max_biases: dict[tuple[str, str], list[float]] = defaultdict(list)
+    seasonal_lead_day_max_biases: dict[tuple[str, str, str], list[float]] = defaultdict(list)
     observations_after_run = [
         observation
         for observation in observations
@@ -277,6 +294,9 @@ def build_provider_reliability_report(
         seasonal_biases[(snapshot.provider_id, day_max_season)].append(max_error)
         seasonal_lead_errors[(snapshot.provider_id, day_max_season, day_max_lead_bucket)].append(abs(max_error))
         seasonal_lead_biases[(snapshot.provider_id, day_max_season, day_max_lead_bucket)].append(max_error)
+        provider_day_max_biases[snapshot.provider_id].append(max_error)
+        seasonal_day_max_biases[(snapshot.provider_id, day_max_season)].append(max_error)
+        seasonal_lead_day_max_biases[(snapshot.provider_id, day_max_season, day_max_lead_bucket)].append(max_error)
 
     provider_reports: dict[str, dict[str, Any]] = {}
     for provider_id in sorted(provider_errors):
@@ -285,6 +305,7 @@ def build_provider_reliability_report(
             biases=provider_biases[provider_id],
             point_sample_count=provider_point_samples.get(provider_id, 0),
             run_ids=provider_run_ids.get(provider_id, set()),
+            day_max_biases=provider_day_max_biases.get(provider_id),
         )
 
     provider_weights = _normalized_weight_map(provider_reports)
@@ -299,6 +320,7 @@ def build_provider_reliability_report(
             biases=seasonal_biases[(provider_id, season)],
             point_sample_count=seasonal_point_samples.get((provider_id, season), 0),
             run_ids=seasonal_run_ids.get((provider_id, season), set()),
+            day_max_biases=seasonal_day_max_biases.get((provider_id, season)),
         )
     provider_weights_by_season = {
         season: _normalized_weight_map(reports)
@@ -317,6 +339,7 @@ def build_provider_reliability_report(
             biases=seasonal_lead_biases[(provider_id, season, lead_bucket)],
             point_sample_count=seasonal_lead_point_samples.get((provider_id, season, lead_bucket), 0),
             run_ids=seasonal_lead_run_ids.get((provider_id, season, lead_bucket), set()),
+            day_max_biases=seasonal_lead_day_max_biases.get((provider_id, season, lead_bucket)),
         )
     provider_weights_by_season_lead_bucket = {
         season: {
@@ -418,22 +441,27 @@ def extract_provider_bias_adjustments(
                 source_report = fallback_report
         if source_report is None:
             continue
+        # 2026-06-12: prefer day-max-only bias over the diluted mean_bias_f.
+        # This adjustment corrects the provider's DAY MAX, so it must be
+        # estimated from day-max errors. mean_bias_f mixes ~24 hourly point
+        # errors (bias ≈ 0) per 1 day-max error, washing out the −1 to −2°F
+        # peak-smoothing bias and leaving mid-range p_yes underconfident by
+        # ~0.3 on the 468-day validation replay. Fall back to mean_bias_f
+        # only when day-max samples are too thin (< 6).
+        raw_bias = None
+        day_max_n = int(source_report.get("day_max_sample_count") or 0)
+        if day_max_n >= 6 and source_report.get("day_max_bias_f") is not None:
+            raw_bias = source_report.get("day_max_bias_f")
+        elif source_report.get("mean_bias_f") is not None:
+            raw_bias = source_report.get("mean_bias_f")
+        if raw_bias is None:
+            continue
         try:
-            bias = Decimal(str(source_report.get("mean_bias_f")))
+            bias = Decimal(str(raw_bias))
         except Exception:
             continue
-        # 2026-05-27 root-cause fix: previously clamped ±1.5°F. Empirically
-        # measured biases (n=4.7M samples per OM provider) show actual
-        # cool biases of −2 to −7°F (median −3 to −7°F by provider). The
-        # 1.5°F cap applied 1/4 to 1/5 of the needed correction, leaving
-        # the blended ensemble max ~5.6°F cool — the root cause of the
-        # less-yes lane disaster (4W/35L, −$4.61).
-        # ±3°F chosen as middle-ground after a simulation showed ±6°F
-        # overcorrects late-day forecasts (which have already converged
-        # to reality, so applying full global bias overshoots warm).
-        # Captures ~70% of the average correction needed for early-day
-        # forecasts (when bias is largest) while limiting overshoot for
-        # late-day forecasts. The proper fix is per-lead-bucket bias
-        # rather than a global clamp — tracking in task #18 follow-up.
+        # ±3°F clamp: with honest per-bucket day-max biases (−0.5 to −3°F
+        # measured across 468 settled city-days) this is a noise bound,
+        # not a correction driver.
         results[provider_id] = max(Decimal("-3"), min(Decimal("3"), bias))
     return results
