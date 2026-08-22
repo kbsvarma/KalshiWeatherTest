@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cms-policy-lab"
+version = "0.1.0"
+description = "Hands-on PREVA lab for extracting grounded CMS coverage and billing rules."
+requires-python = ">=3.11"
+dependencies = [
+  "docling>=2.50,<3",
+  "pypdf>=5,<7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9"]
+
+[project.scripts]
+cms-stage1-parse = "cms_policy_lab.stage1_parse:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
